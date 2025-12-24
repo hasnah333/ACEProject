@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test des Endpoints API</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        h1 {
+            color: #333;
+        }
+        h2 {
+            color: #555;
+            margin-top: 0;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .result {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 15px;
+            margin-top: 10px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        .success {
+            border-color: #28a745;
+            background: #d4edda;
+        }
+        .error {
+            border-color: #dc3545;
+            background: #f8d7da;
+        }
+        .loading {
+            color: #007bff;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 Test des Endpoints API</h1>
+
+    <div class="container">
+        <h2>1. Test Dashboard Stats</h2>
+        <button onclick="testDashboardStats()">Tester /api/dashboard/stats</button>
+        <div id="dashboard-result" class="result" style="display:none;"></div>
+    </div>
+
+    <div class="container">
+        <h2>2. Test Models List</h2>
+        <button onclick="testModelsList()">Tester /ml/api/models/list</button>
+        <div id="models-result" class="result" style="display:none;"></div>
+    </div>
+
+    <div class="container">
+        <h2>3. Test MLflow Runs</h2>
+        <button onclick="testMLflowRuns()">Tester MLflow API</button>
+        <div id="mlflow-result" class="result" style="display:none;"></div>
+    </div>
+
+    <div class="container">
+        <h2>4. Test Model Metrics</h2>
+        <input type="text" id="model-id" placeholder="model_id (ex: xgb_20251221_160658)" style="padding: 8px; width: 300px; margin-right: 10px;">
+        <button onclick="testModelMetrics()">Tester /ml/metrics/{model_id}</button>
+        <div id="metrics-result" class="result" style="display:none;"></div>
+    </div>
+
+    <script>
+        function showResult(elementId, data, isError = false) {
+            const element = document.getElementById(elementId);
+            element.style.display = 'block';
+            element.className = 'result ' + (isError ? 'error' : 'success');
+            element.textContent = isError ? data : JSON.stringify(data, null, 2);
+        }
+
+        function showLoading(elementId) {
+            const element = document.getElementById(elementId);
+            element.style.display = 'block';
+            element.className = 'result loading';
+            element.textContent = 'Chargement...';
+        }
+
+        async function testDashboardStats() {
+            const resultId = 'dashboard-result';
+            showLoading(resultId);
+            
+            try {
+                const response = await fetch('/api/dashboard/stats');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                const data = await response.json();
+                showResult(resultId, data);
+            } catch (error) {
+                showResult(resultId, `Erreur: ${error.message}`, true);
+            }
+        }
+
+        async function testModelsList() {
+            const resultId = 'models-result';
+            showLoading(resultId);
+            
+            try {
+                const response = await fetch('/ml/api/models/list');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                const data = await response.json();
+                showResult(resultId, data);
+            } catch (error) {
+                showResult(resultId, `Erreur: ${error.message}`, true);
+            }
+        }
+
+        async function testMLflowRuns() {
+            const resultId = 'mlflow-result';
+            showLoading(resultId);
+            
+            try {
+                const response = await fetch('http://localhost:5000/api/2.0/mlflow/runs/search', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        experiment_ids: ['1'],
+                        max_results: 10,
+                    }),
+                });
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                const data = await response.json();
+                showResult(resultId, data);
+            } catch (error) {
+                showResult(resultId, `Erreur: ${error.message}\n\nNote: MLflow doit être accessible directement depuis le navigateur ou configuré avec CORS.`, true);
+            }
+        }
+
+        async function testModelMetrics() {
+            const resultId = 'metrics-result';
+            const modelId = document.getElementById('model-id').value.trim();
+            
+            if (!modelId) {
+                showResult(resultId, 'Veuillez entrer un model_id', true);
+                return;
+            }
+            
+            showLoading(resultId);
+            
+            try {
+                const response = await fetch(`/ml/metrics/${modelId}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                const data = await response.json();
+                showResult(resultId, data);
+            } catch (error) {
+                showResult(resultId, `Erreur: ${error.message}`, true);
+            }
+        }
+
+        // Test automatique au chargement
+        window.addEventListener('load', () => {
+            console.log('🧪 Page de test chargée');
+            console.log('📝 Testez les endpoints en cliquant sur les boutons ci-dessus');
+        });
+    </script>
+</body>
+</html>
+
+

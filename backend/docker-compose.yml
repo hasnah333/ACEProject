@@ -1,0 +1,159 @@
+version: '3.8'
+
+services:
+  # Base de données PostgreSQL
+  postgres:
+    image: postgres:15-alpine
+    container_name: ace_postgres
+    environment:
+      POSTGRES_USER: ace_user
+      POSTGRES_PASSWORD: ace_password
+      POSTGRES_DB: ace_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ace_user -d ace_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis pour le cache
+  redis:
+    image: redis:7-alpine
+    container_name: ace_redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Service de collecte des dépôts
+  collecte-depots:
+    build:
+      context: ./services/collecte-depots
+      dockerfile: Dockerfile
+    container_name: ace_collecte_depots
+    ports:
+      - "8001:8001"
+    environment:
+      - DATABASE_URL=postgresql://ace_user:ace_password@postgres:5432/ace_db
+      - REDIS_URL=redis://redis:6379
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./data/repos:/app/repos
+
+  # Service de prétraitement et features
+  pretraitement-features:
+    build:
+      context: ./services/pretraitement-features
+      dockerfile: Dockerfile
+    container_name: ace_pretraitement
+    ports:
+      - "8002:8002"
+    environment:
+      - DATABASE_URL=postgresql://ace_user:ace_password@postgres:5432/ace_db
+      - REDIS_URL=redis://redis:6379
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./data/datasets:/app/datasets
+      - ./data/features:/app/features
+
+  # Service ML (entraînement et prédictions)
+  ml-service:
+    build:
+      context: ./services/ml-service
+      dockerfile: Dockerfile
+    container_name: ace_ml_service
+    ports:
+      - "8003:8003"
+    environment:
+      - DATABASE_URL=postgresql://ace_user:ace_password@postgres:5432/ace_db
+      - REDIS_URL=redis://redis:6379
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./data/models:/app/models
+      - ./data/datasets:/app/datasets
+
+  # Moteur de priorisation
+  moteur-priorisation:
+    build:
+      context: ./services/moteur-priorisation
+      dockerfile: Dockerfile
+    container_name: ace_priorisation
+    ports:
+      - "8004:8004"
+    environment:
+      - DATABASE_URL=postgresql://ace_user:ace_password@postgres:5432/ace_db
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # Service d'analyse statique
+  analyse-statique:
+    build:
+      context: ./services/analyse-statique
+      dockerfile: Dockerfile
+    container_name: ace_analyse_statique
+    ports:
+      - "8005:8005"
+    environment:
+      - DATABASE_URL=postgresql://ace_user:ace_password@postgres:5432/ace_db
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./data/repos:/app/repos
+
+  # MLflow pour le suivi des expériences
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.9.2
+    container_name: ace_mlflow
+    ports:
+      - "5000:5000"
+    environment:
+      - MLFLOW_TRACKING_URI=sqlite:///mlflow.db
+    command: mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:///mlflow.db --default-artifact-root /mlflow/artifacts
+    volumes:
+      - mlflow_data:/mlflow
+
+  # API Gateway (optionnel)
+  nginx:
+    image: nginx:alpine
+    container_name: ace_nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - collecte-depots
+      - pretraitement-features
+      - ml-service
+      - moteur-priorisation
+      - analyse-statique
+
+volumes:
+  postgres_data:
+  mlflow_data:

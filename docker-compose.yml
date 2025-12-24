@@ -1,0 +1,220 @@
+version: '3.8'
+
+# ===========================================
+# ACE Project - Full Stack Docker Compose
+# Frontend + Backend + Infrastructure
+# ===========================================
+
+services:
+  # ===========================================
+  # INFRASTRUCTURE
+  # ===========================================
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: ace_postgres
+    environment:
+      POSTGRES_USER: ace_user
+      POSTGRES_PASSWORD: ace_password
+      POSTGRES_DB: ace_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ace_user -d ace_db" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ace_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: ace_redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ace_network
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.9.2
+    container_name: ace_mlflow
+    ports:
+      - "5000:5000"
+    command: mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:///mlflow.db --default-artifact-root /mlflow/artifacts
+    volumes:
+      - mlflow_data:/mlflow
+    networks:
+      - ace_network
+
+  # ===========================================
+  # BACKEND SERVICES
+  # ===========================================
+
+  collecte-depots:
+    build:
+      context: ./backend/services/collecte-depots
+      dockerfile: Dockerfile
+    container_name: ace_collecte_depots
+    ports:
+      - "8001:8001"
+    environment:
+      - DATABASE_URL=postgresql://ace_user:ace_password@postgres:5432/ace_db
+      - REDIS_URL=redis://redis:6379
+      - PRETRAITEMENT_URL=http://pretraitement-features:8002
+      - ML_SERVICE_URL=http://ml-service:8003
+      - PRIORISATION_URL=http://moteur-priorisation:8004
+      - ANALYSE_STATIQUE_URL=http://analyse-statique:8005
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - repos_data:/app/repos
+    networks:
+      - ace_network
+
+  pretraitement-features:
+    build:
+      context: ./backend/services/pretraitement-features
+      dockerfile: Dockerfile
+    container_name: ace_pretraitement
+    ports:
+      - "8002:8002"
+    environment:
+      - DATABASE_URL=postgresql://ace_user:ace_password@postgres:5432/ace_db
+      - REDIS_URL=redis://redis:6379
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - DATASETS_PATH=/app/datasets
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - datasets_data:/app/datasets
+    networks:
+      - ace_network
+
+  ml-service:
+    build:
+      context: ./backend/services/ml-service
+      dockerfile: Dockerfile
+    container_name: ace_ml_service
+    ports:
+      - "8003:8003"
+    environment:
+      - DATABASE_URL=postgresql://ace_user:ace_password@postgres:5432/ace_db
+      - REDIS_URL=redis://redis:6379
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - MODELS_PATH=/app/models
+      - DATASETS_PATH=/app/datasets
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - models_data:/app/models
+      - datasets_data:/app/datasets
+    networks:
+      - ace_network
+
+  moteur-priorisation:
+    build:
+      context: ./backend/services/moteur-priorisation
+      dockerfile: Dockerfile
+    container_name: ace_priorisation
+    ports:
+      - "8004:8004"
+    environment:
+      - DATABASE_URL=postgresql://ace_user:ace_password@postgres:5432/ace_db
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ace_network
+
+  analyse-statique:
+    build:
+      context: ./backend/services/analyse-statique
+      dockerfile: Dockerfile
+    container_name: ace_analyse_statique
+    ports:
+      - "8005:8005"
+    environment:
+      - DATABASE_URL=postgresql://ace_user:ace_password@postgres:5432/ace_db
+      - REPOS_PATH=/app/repos
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - repos_data:/app/repos
+    networks:
+      - ace_network
+
+  # ===========================================
+  # FRONTEND
+  # ===========================================
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ace_frontend
+    ports:
+      - "3000:80"
+    environment:
+      - VITE_BACKEND_URL=http://localhost:8001
+      - VITE_ML_SERVICE_URL=http://localhost:8003
+      - VITE_PRETRAITEMENT_URL=http://localhost:8002
+      - VITE_MOTEUR_PRIORISATION_URL=http://localhost:8004
+      - VITE_MLFLOW_URL=http://localhost:5000
+    depends_on:
+      - collecte-depots
+      - pretraitement-features
+      - ml-service
+      - moteur-priorisation
+      - analyse-statique
+    networks:
+      - ace_network
+
+  # ===========================================
+  # API GATEWAY (Optional - for production)
+  # ===========================================
+
+  nginx:
+    image: nginx:alpine
+    container_name: ace_nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./backend/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - collecte-depots
+      - pretraitement-features
+      - ml-service
+      - moteur-priorisation
+      - analyse-statique
+      - frontend
+    networks:
+      - ace_network
+    profiles:
+      - production
+
+networks:
+  ace_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  mlflow_data:
+  repos_data:
+  datasets_data:
+  models_data:
