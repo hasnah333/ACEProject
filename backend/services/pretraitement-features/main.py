@@ -481,17 +481,24 @@ async def list_datasets(db: AsyncSession = Depends(get_db)):
         text("SELECT id, train_samples, test_samples, n_features, feature_names, created_at FROM datasets ORDER BY created_at DESC")
     )
     rows = result.fetchall()
-    return [
-        DatasetInfo(
+    
+    datasets = []
+    for row in rows:
+        feat_names = row[4]
+        if isinstance(feat_names, str):
+            feat_names = json.loads(feat_names)
+        elif feat_names is None:
+            feat_names = []
+            
+        datasets.append(DatasetInfo(
             dataset_id=row[0],
             train_samples=row[1],
             test_samples=row[2],
             n_features=row[3],
-            feature_names=json.loads(row[4]) if row[4] else [],
+            feature_names=feat_names,
             created_at=row[5].isoformat() if row[5] else ""
-        )
-        for row in rows
-    ]
+        ))
+    return datasets
 
 
 @app.get("/datasets/{dataset_id}", response_model=DatasetInfo)
@@ -509,12 +516,18 @@ async def get_dataset_info(dataset_id: int, db: AsyncSession = Depends(get_db)):
     if not row:
         raise HTTPException(status_code=404, detail="Dataset not found")
     
+    feat_names = row[4]
+    if isinstance(feat_names, str):
+        feat_names = json.loads(feat_names)
+    elif feat_names is None:
+        feat_names = []
+
     return DatasetInfo(
         dataset_id=row[0],
         train_samples=row[1],
         test_samples=row[2],
         n_features=row[3],
-        feature_names=json.loads(row[4]) if row[4] else [],
+        feature_names=feat_names,
         created_at=row[5].isoformat() if row[5] else ""
     )
 
