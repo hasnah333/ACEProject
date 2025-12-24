@@ -1,13 +1,13 @@
 # ACE Project - Prédiction de Défauts et Priorisation de Tests
 
-## 🎯 Description
+##  Description
 
 Système intelligent de prédiction de défauts logiciels et de priorisation des tests basé sur :
 - **Analyse statique** : Métriques CK (WMC, DIT, NOC, CBO, RFC, LCOM), complexité cyclomatique (McCabe)
 - **Machine Learning** : Classification avec XGBoost/LightGBM, métriques effort-aware (Popt@20)
 - **Optimisation** : OR-Tools pour la priorisation sous contraintes
 
-## 🏗️ Architecture
+##  Architecture
 
 ```
 ACEProjet/
@@ -31,38 +31,8 @@ ACEProjet/
 └── docker-compose.yml          # Orchestration globale
 ```
 
-## 🚀 Démarrage Rapide
 
-### Option 1: Docker Compose (Recommandé)
-
-```bash
-# Cloner et démarrer tout le projet
-docker-compose up -d --build
-
-# Accéder aux services
-# Frontend: http://localhost:3000
-# Backend API: http://localhost:8001
-# MLflow: http://localhost:5000
-```
-
-### Option 2: Développement Local
-
-```bash
-# Terminal 1 - Backend (Docker)
-cd backend
-docker-compose up -d
-
-# Terminal 2 - Frontend
-cd frontend
-npm install
-npm run dev
-# Frontend: http://localhost:5173
-```
-
-### Windows
-Double-cliquez sur `start.bat` et suivez les instructions.
-
-## 📊 Fonctionnalités
+##  Fonctionnalités
 
 ### Dashboard
 - Vue d'ensemble de la qualité du code
@@ -84,7 +54,7 @@ Double-cliquez sur `start.bat` et suivez les instructions.
 | **Dépendances** | Fan-in, Fan-out |
 | **ML** | F1, PR-AUC, ROC-AUC, Popt@20, Recall@Top20% |
 
-## 🔗 URLs des Services
+##  URLs des Services
 
 | Service | URL | Description |
 |---------|-----|-------------|
@@ -98,7 +68,7 @@ Double-cliquez sur `start.bat` et suivez les instructions.
 | MLflow | http://localhost:5000 | Tracking ML |
 | PostgreSQL | localhost:5432 | Base de données |
 
-## 📡 API Endpoints Principaux
+##  API Endpoints Principaux
 
 ### Repositories
 ```
@@ -121,7 +91,7 @@ POST   /prioritize             # Plan de tests priorisé
 GET    /policies               # Politiques de priorisation
 ```
 
-## 🛠️ Technologies
+##  Technologies
 
 ### Frontend
 - React 18 + TypeScript
@@ -166,10 +136,9 @@ GET    /policies               # Politiques de priorisation
 
 ## 👥 Équipe
 
-- Pr. Oumayma OUEDRHIRI
-- Pr. Hiba TABBAA
-- Pr. Mohamed LACHGAR
+- othmani hasna
+- ait ben brahim hasna
+- ait bihi oumaima
+- el bahtari hafsa
 
-## 📄 License
-
-Ce projet est développé dans le cadre académique.
+##  Ce projet est développé dans le cadre académique.
