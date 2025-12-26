@@ -2,8 +2,7 @@ import { useState, useEffect } from 'react'
 import { UiCard } from '../components/ui/UiCard'
 import { ChartPanel } from '../components/ui/ChartPanel'
 import { priorisationClient, mlServiceClient, backendClient } from '../services/api/client'
-import { listRepos } from '../services/api/repoService'
-import type { Repo } from '../services/api/repoService'
+import { useRepos } from '../context/RepoContext'
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
     PieChart, Pie, Cell, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
@@ -50,33 +49,25 @@ const HEURISTIC_COLORS: Record<string, string> = {
 
 export function AdvancedDashboardPage() {
     const [loading, setLoading] = useState(true)
-    const [repos, setRepos] = useState<Repo[]>([])
-    const [selectedRepoId, setSelectedRepoId] = useState<number | null>(null)
+    const { repos, selectedRepoId, setSelectedRepoId } = useRepos()
     const [heuristicData, setHeuristicData] = useState<HeuristicComparison[]>([])
     const [metrics, setMetrics] = useState<DashboardMetrics | null>(null)
     const [modelPerformance, setModelPerformance] = useState<ModelPerformance[]>([])
     const [timeSeriesData, setTimeSeriesData] = useState<any[]>([])
 
+    // Sélectionner le premier repo si aucun n'est sélectionné
     useEffect(() => {
-        const loadRepos = async () => {
-            try {
-                const list = await listRepos()
-                setRepos(list)
-                if (list.length > 0) {
-                    setSelectedRepoId(list[0].id)
-                }
-            } catch (e) {
-                console.error('Failed to load repos:', e)
-            }
+        if (repos.length > 0 && !selectedRepoId) {
+            setSelectedRepoId(repos[0].id)
         }
-        loadRepos()
-    }, [])
+    }, [repos, selectedRepoId, setSelectedRepoId])
 
     useEffect(() => {
         if (selectedRepoId) {
             loadDashboardData()
         }
     }, [selectedRepoId])
+
 
     const loadDashboardData = async () => {
         setLoading(true)
@@ -133,7 +124,7 @@ export function AdvancedDashboardPage() {
         try {
             // Essayer de charger les vraies métriques depuis les APIs
             const [modelsResponse, _priorResponse] = await Promise.allSettled([
-                mlServiceClient.get('/api/models/list'),
+                mlServiceClient.get('/ml/models/list'),
                 priorisationClient.get('/policies')
             ])
 
@@ -176,7 +167,7 @@ export function AdvancedDashboardPage() {
 
     const loadModelPerformance = async () => {
         try {
-            const response = await mlServiceClient.get('/api/models/list')
+            const response = await mlServiceClient.get('/ml/models/list')
             if (response.data?.models) {
                 setModelPerformance(response.data.models.slice(0, 5).map((m: any) => ({
                     model_id: m.model_id,

@@ -1,11 +1,8 @@
-import axios from 'axios'
-import API_CONFIG from '../../config/api'
+// Importer le client centralisé
+import { analyseStatiqueClient } from './client'
 
-// Client pour l'analyse statique
-export const analyseStatiqueClient = axios.create({
-    baseURL: API_CONFIG.ANALYSE_STATIQUE_URL,
-    timeout: 120_000, // 2 minutes pour l'analyse
-})
+// Réexporter pour la compatibilité
+export { analyseStatiqueClient }
 
 // Types
 export type FileMetrics = {

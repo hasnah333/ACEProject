@@ -36,14 +36,12 @@ export function RepoPage() {
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
         <div className="xl:col-span-2">
-          <TrendLineChart title="Coverage by module" />
+          <TrendLineChart title="Coverage by module" repoId={id} />
         </div>
         <div className="xl:col-span-1">
-          <ModuleQualityTable />
+          <ModuleQualityTable repoId={id} />
         </div>
       </div>
     </div>
   )
 }
-
-

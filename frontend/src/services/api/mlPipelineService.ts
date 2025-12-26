@@ -100,7 +100,7 @@ export async function executeCompletePipeline(
     // Step 3: Train model
     updateProgress({ step: 'training', status: 'running', message: 'Training ML model (this may take several minutes)...' })
     const training = await mlServiceClient.post<AutoTuneResponse>(
-      '/train/auto',
+      '/ml/train/auto',
       {
         dataset_id: features.data.dataset_id,
         repo_id: request.repo_id,
@@ -183,7 +183,7 @@ export async function executeCompletePipeline(
  * Train model with auto-tuning
  */
 export async function trainModel(request: AutoTuneRequest): Promise<AutoTuneResponse> {
-  const { data } = await mlServiceClient.post<AutoTuneResponse>('/train/auto', request)
+  const { data } = await mlServiceClient.post<AutoTuneResponse>('/ml/train/auto', request)
   return data
 }
 
@@ -197,7 +197,7 @@ export async function getPredictions(
   predictions: Array<{ id: string; risk: number; probability: number }>
   model_id: string
 }> {
-  const { data } = await mlServiceClient.post('/predict', {
+  const { data } = await mlServiceClient.post('/ml/predict', {
     dataset_id: datasetId,
     model_id: modelId
   })
