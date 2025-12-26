@@ -54,6 +54,22 @@ services:
     networks:
       - ace_network
 
+  jenkins:
+    image: jenkins/jenkins:lts
+    container_name: ace_jenkins
+    privileged: true
+    user: root
+    ports:
+      - "8080:8080"
+      - "50000:50000"
+    volumes:
+      - jenkins_data:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - JAVA_OPTS=-Djenkins.install.runSetupWizard=false
+    networks:
+      - ace_network
+
   # ===========================================
   # BACKEND SERVICES
   # ===========================================
@@ -215,6 +231,9 @@ networks:
 volumes:
   postgres_data:
   mlflow_data:
+  jenkins_data:
   repos_data:
   datasets_data:
   models_data:
+
+
