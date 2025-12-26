@@ -9,7 +9,7 @@ import {
 import { listRepos } from '../services/api/repoService'
 
 export type ConnectedRepo = {
-  id: number
+  id: string
   name: string
   url: string
   defaultBranch: string
@@ -18,16 +18,12 @@ export type ConnectedRepo = {
 
 type RepoContextValue = {
   repos: ConnectedRepo[]
-  selectedRepo: ConnectedRepo | null
-  selectedRepoId: number | null
-  setSelectedRepoId: (id: number | null) => void
-  addRepo: (input: Omit<ConnectedRepo, 'id' | 'createdAt'>, forceId?: number) => ConnectedRepo
-  getRepo: (id: string | number | undefined) => ConnectedRepo | undefined
+  addRepo: (input: Omit<ConnectedRepo, 'id' | 'createdAt'>, forceId?: string) => ConnectedRepo
+  getRepo: (id: string | undefined) => ConnectedRepo | undefined
   refreshRepos: () => Promise<void>
 }
 
 const STORAGE_KEY = 'qd_connected_repos'
-const SELECTED_REPO_KEY = 'qd_selected_repo_id'
 
 const RepoContext = createContext<RepoContextValue | undefined>(undefined)
 
@@ -44,48 +40,20 @@ function loadInitial(): ConnectedRepo[] {
   }
 }
 
-function loadSelectedRepoId(): number | null {
-  if (typeof window === 'undefined') return null
-  try {
-    const raw = window.localStorage.getItem(SELECTED_REPO_KEY)
-    if (!raw) return null
-    return parseInt(raw, 10)
-  } catch {
-    return null
-  }
-}
-
 export function RepoProvider({ children }: { children: ReactNode }) {
   const [repos, setRepos] = useState<ConnectedRepo[]>(() => loadInitial())
-  const [selectedRepoId, setSelectedRepoIdState] = useState<number | null>(() => loadSelectedRepoId())
-
-  const setSelectedRepoId = (id: number | null) => {
-    setSelectedRepoIdState(id)
-    if (typeof window !== 'undefined') {
-      if (id !== null) {
-        window.localStorage.setItem(SELECTED_REPO_KEY, id.toString())
-      } else {
-        window.localStorage.removeItem(SELECTED_REPO_KEY)
-      }
-    }
-  }
 
   const refreshRepos = async () => {
     try {
       const backendRepos = await listRepos()
       const formatted: ConnectedRepo[] = backendRepos.map(r => ({
-        id: typeof r.id === 'string' ? parseInt(r.id, 10) : r.id,
+        id: r.id.toString(),
         name: r.name,
         url: r.url,
         defaultBranch: (r as any).default_branch || 'main',
         createdAt: (r as any).created_at || new Date().toISOString()
       }))
       setRepos(formatted)
-
-      // Si aucun repo sélectionné et qu'on a des repos, sélectionner le premier
-      if (selectedRepoId === null && formatted.length > 0) {
-        setSelectedRepoId(formatted[0].id)
-      }
     } catch (e) {
       console.error('Failed to sync repos with backend:', e)
     }
@@ -100,22 +68,16 @@ export function RepoProvider({ children }: { children: ReactNode }) {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(repos))
   }, [repos])
 
-  const selectedRepo = useMemo(() => {
-    if (selectedRepoId === null) return null
-    return repos.find(r => r.id === selectedRepoId) || null
-  }, [repos, selectedRepoId])
-
   const value = useMemo<RepoContextValue>(
     () => ({
       repos,
-      selectedRepo,
-      selectedRepoId,
-      setSelectedRepoId,
       addRepo: (input, forceId) => {
-        const id = forceId ?? Date.now()
+        const id = forceId ||
+          input.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-') ||
+          `repo-${Date.now()}`
         const repo: ConnectedRepo = {
           id,
-          name: input.name.trim() || `repo-${id}`,
+          name: input.name.trim() || id,
           url: input.url.trim(),
           defaultBranch: input.defaultBranch.trim() || 'main',
           createdAt: new Date().toISOString(),
@@ -129,14 +91,10 @@ export function RepoProvider({ children }: { children: ReactNode }) {
         })
         return repo
       },
-      getRepo: (id) => {
-        if (id === undefined) return undefined
-        const numId = typeof id === 'string' ? parseInt(id, 10) : id
-        return repos.find((r) => r.id === numId)
-      },
+      getRepo: (id) => repos.find((r) => r.id === id),
       refreshRepos,
     }),
-    [repos, selectedRepo, selectedRepoId],
+    [repos],
   )
 
   return <RepoContext.Provider value={value}>{children}</RepoContext.Provider>
@@ -149,3 +107,5 @@ export function useRepos() {
   }
   return ctx
 }
+
+

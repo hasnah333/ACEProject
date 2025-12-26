@@ -12,7 +12,7 @@ Métriques selon le cahier de charges:
 
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 from pydantic_settings import BaseSettings
 from typing import Optional, List, Dict, Any, Literal
 from contextlib import asynccontextmanager
@@ -28,7 +28,7 @@ import uuid
 import joblib
 
 # ML imports
-from sklearn.model_selection import cross_val_score, StratifiedKFold, KFold
+from sklearn.model_selection import cross_val_score, StratifiedKFold
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
@@ -148,8 +148,6 @@ class AutoTuneRequest(BaseModel):
     threshold_metric: Literal["f1", "accuracy"] = "f1"
     n_trials: int = 30
     use_temporal_cv: bool = True
-    
-    model_config = ConfigDict(protected_namespaces=())
 
 
 class AutoTuneResponse(BaseModel):
@@ -160,8 +158,6 @@ class AutoTuneResponse(BaseModel):
     best_params: Dict[str, Any]
     diagnosis: Dict[str, Any]
     mlflow_run_id: Optional[str] = None
-    
-    model_config = ConfigDict(protected_namespaces=())
 
 
 class PredictRequest(BaseModel):
@@ -169,8 +165,6 @@ class PredictRequest(BaseModel):
     model_id: Optional[str] = None
     items: Optional[List[Dict[str, Any]]] = None
     include_uncertainty: bool = False
-    
-    model_config = ConfigDict(protected_namespaces=())
 
 
 class PredictResponse(BaseModel):
@@ -313,11 +307,40 @@ def create_model(model_type: str, params: Dict = None) -> Any:
 
 
 def tune_hyperparameters(X: np.ndarray, y: np.ndarray, model_type: str, n_trials: int = 30) -> Dict:
-    """Optimise les hyperparamètres avec Optuna (Version Robuste)."""
-    logger.info(f"Hyperparameter tuning requested for {len(y)} samples and {len(np.unique(y))} classes.")
-    # On retourne un dictionnaire vide pour utiliser les paramètres par défaut
-    # Cela évite les bugs avec StratifiedKFold sur des petits datasets de démo
-    return {}
+    """Optimise les hyperparamètres avec Optuna."""
+    if not HAS_OPTUNA:
+        return {}
+    
+    def objective(trial):
+        if model_type in ["xgb", "lgbm", "ensemble"]:
+            params = {
+                "n_estimators": trial.suggest_int("n_estimators", 50, 300),
+                "max_depth": trial.suggest_int("max_depth", 3, 10),
+                "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3, log=True),
+            }
+        elif model_type == "rf":
+            params = {
+                "n_estimators": trial.suggest_int("n_estimators", 50, 300),
+                "max_depth": trial.suggest_int("max_depth", 3, 20),
+            }
+        else:
+            params = {
+                "C": trial.suggest_float("C", 0.01, 10, log=True),
+            }
+        
+        model = create_model(model_type if model_type != "ensemble" else "xgb", params)
+        
+        try:
+            cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+            scores = cross_val_score(model, X, y, cv=cv, scoring="roc_auc")
+            return scores.mean()
+        except Exception:
+            return 0.0
+    
+    study = optuna.create_study(direction="maximize")
+    study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
+    
+    return study.best_params
 
 
 # ============ Endpoints ============
@@ -347,7 +370,7 @@ async def health(db: AsyncSession = Depends(get_db)):
         return {"status": "unhealthy", "database": str(e)}
 
 
-@app.post("/ml/train/auto", response_model=AutoTuneResponse)
+@app.post("/train/auto", response_model=AutoTuneResponse)
 async def train_with_auto_tune(request: AutoTuneRequest, db: AsyncSession = Depends(get_db)):
     """
     Entraîne un modèle avec auto-tuning des hyperparamètres.
@@ -368,10 +391,8 @@ async def train_with_auto_tune(request: AutoTuneRequest, db: AsyncSession = Depe
             y_test = test_df["is_buggy"].values
         else:
             from sklearn.model_selection import train_test_split
-            # Ne pas stratifier si on a moins de 2 classes
-            stratify = y_train if len(np.unique(y_train)) > 1 else None
             X_train, X_test, y_train, y_test = train_test_split(
-                X_train, y_train, test_size=0.2, random_state=42, stratify=stratify
+                X_train, y_train, test_size=0.2, random_state=42, stratify=y_train
             )
         
         # Remplacer les NaN
@@ -394,39 +415,18 @@ async def train_with_auto_tune(request: AutoTuneRequest, db: AsyncSession = Depe
         
         # Entraîner le modèle final
         logger.info(f"Training final model with params: {best_params}")
-        
-        # Sécurité XGBoost/LGBM: s'assurer d'avoir au moins 2 classes pour les classifieurs binaires
-        if len(np.unique(y_train)) < 2:
-            logger.warning("Only one class in training data. Adding dummy sample to satisfy classifier.")
-            dummy_X = np.zeros((1, X_train.shape[1]))
-            # Ajouter la classe manquante (si on a que des 0, ajouter un 1, et vice-versa)
-            dummy_y = np.array([1 if 0 in y_train else 0])
-            X_train = np.concatenate([X_train, dummy_X])
-            y_train = np.concatenate([y_train, dummy_y])
-
         model = create_model(model_type, best_params)
         model.fit(X_train, y_train)
         
-        # Prédictions robustes (gestion monoclasse)
+        # Prédictions
         y_pred = model.predict(X_test)
-        if hasattr(model, "predict_proba"):
-            probs = model.predict_proba(X_test)
-            if probs.shape[1] > 1:
-                y_prob = probs[:, 1]
-            else:
-                # Cas où le modèle n'a vu qu'une seule classe à l'entraînement
-                if 1 in getattr(model, "classes_", []):
-                    y_prob = probs[:, 0]
-                else:
-                    y_prob = 1.0 - probs[:, 0]
-        else:
-            y_prob = y_pred.astype(float)
+        y_prob = model.predict_proba(X_test)[:, 1] if hasattr(model, "predict_proba") else y_pred.astype(float)
         
         # Calculer le seuil optimal
         optimal_threshold = find_optimal_threshold(y_test, y_prob, request.threshold_metric)
         y_pred_optimal = (y_prob >= optimal_threshold).astype(int)
         
-        # Calculer toutes les métriques de manière sécurisée
+        # Calculer toutes les métriques
         metrics = {
             "accuracy": float(accuracy_score(y_test, y_pred_optimal)),
             "precision": float(precision_score(y_test, y_pred_optimal, zero_division=0)),
@@ -449,8 +449,8 @@ async def train_with_auto_tune(request: AutoTuneRequest, db: AsyncSession = Depe
         metrics["popt_20"] = calculate_popt_at_k(y_test, y_prob, effort, k=0.2)
         metrics["recall_top_20"] = calculate_recall_at_top_k(y_test, y_prob, k=0.2)
         
-        # Matrice de confusion (forcer labels=[0, 1] pour garantir une matrice 2x2)
-        cm = confusion_matrix(y_test, y_pred_optimal, labels=[0, 1])
+        # Matrice de confusion
+        cm = confusion_matrix(y_test, y_pred_optimal)
         confusion = {
             "tn": int(cm[0, 0]),
             "fp": int(cm[0, 1]),
@@ -467,20 +467,7 @@ async def train_with_auto_tune(request: AutoTuneRequest, db: AsyncSession = Depe
         mlflow_run_id = None
         if HAS_MLFLOW:
             try:
-                # Nom descriptif pour MLflow: Type_Dataset_ID
-                model_type_display = {
-                    "xgb": "XGBoost",
-                    "lgbm": "LightGBM",
-                    "rf": "RandomForest",
-                    "logreg": "LogisticRegression",
-                    "ensemble": "Ensemble"
-                }.get(model_type, model_type.upper())
-                run_name = f"{model_type_display}_dataset_{request.dataset_id}"
-                
-                with mlflow.start_run(run_name=run_name):
-                    mlflow.log_param("model_type", model_type_display)
-                    mlflow.log_param("dataset_id", request.dataset_id)
-                    mlflow.log_param("repo_id", request.repo_id)
+                with mlflow.start_run(run_name=model_id):
                     mlflow.log_params(best_params)
                     mlflow.log_metrics(metrics)
                     mlflow.sklearn.log_model(model, "model")
@@ -543,14 +530,11 @@ async def train_with_auto_tune(request: AutoTuneRequest, db: AsyncSession = Depe
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        import traceback
-        logger.error(f"Training failed with error: {e}")
-        logger.error(f"Local variables at failure: { {k: type(v) for k, v in locals().items()} }")
-        traceback.print_exc()
+        logger.error(f"Training failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/ml/predict", response_model=PredictResponse)
+@app.post("/predict", response_model=PredictResponse)
 async def predict(request: PredictRequest, db: AsyncSession = Depends(get_db)):
     """Fait des prédictions avec un modèle entraîné."""
     
@@ -561,17 +545,13 @@ async def predict(request: PredictRequest, db: AsyncSession = Depends(get_db)):
             {"id": request.model_id}
         )
     else:
-        # Utiliser le meilleur modèle (par accuracy, puis roc_auc, puis f1_score)
+        # Utiliser le meilleur modèle
         model_query = await db.execute(
             text("""
                 SELECT model_id, model_type, model_path, optimal_threshold 
                 FROM models 
                 WHERE is_active = TRUE 
-                ORDER BY 
-                    accuracy DESC NULLS LAST,
-                    roc_auc DESC NULLS LAST,
-                    f1_score DESC NULLS LAST,
-                    created_at DESC
+                ORDER BY roc_auc DESC NULLS LAST 
                 LIMIT 1
             """)
         )
@@ -634,7 +614,7 @@ async def predict(request: PredictRequest, db: AsyncSession = Depends(get_db)):
     )
 
 
-@app.get("/ml/models/list")
+@app.get("/api/models/list")
 async def list_models(db: AsyncSession = Depends(get_db)):
     """Liste tous les modèles entraînés."""
     result = await db.execute(
@@ -673,56 +653,7 @@ async def list_models(db: AsyncSession = Depends(get_db)):
     return {"models": models}
 
 
-@app.put("/ml/models/{model_id}/status")
-async def update_model_status(model_id: str, request: Dict[str, bool], db: AsyncSession = Depends(get_db)):
-    """Active ou désactive un modèle."""
-    is_active = request.get("is_active", True)
-    await db.execute(
-        text("UPDATE models SET is_active = :status WHERE model_id = :id"),
-        {"status": is_active, "id": model_id}
-    )
-    await db.commit()
-    return {"status": "success", "is_active": is_active}
-
-
-@app.put("/ml/models/{model_id}/set-best")
-async def set_best_model(model_id: str, db: AsyncSession = Depends(get_db)):
-    """Définit un modèle comme étant le meilleur (is_best=True) et désactive les autres."""
-    # Désactiver is_best pour tous les modèles
-    await db.execute(text("UPDATE models SET is_best = FALSE"))
-    # Activer is_best pour celui-ci
-    await db.execute(
-        text("UPDATE models SET is_best = TRUE, is_active = TRUE WHERE model_id = :id"),
-        {"id": model_id}
-    )
-    await db.commit()
-    return {"status": "success", "model_id": model_id}
-
-
-@app.delete("/ml/models/{model_id}")
-async def delete_model(model_id: str, db: AsyncSession = Depends(get_db)):
-    """Supprime un modèle de la base et du disque."""
-    # Récupérer le chemin du fichier
-    result = await db.execute(
-        text("SELECT model_path FROM models WHERE model_id = :id"),
-        {"id": model_id}
-    )
-    row = result.fetchone()
-    if row and row[0] and os.path.exists(row[0]):
-        try:
-            os.remove(row[0])
-        except Exception as e:
-            logger.warning(f"Could not delete model file: {e}")
-            
-    await db.execute(
-        text("DELETE FROM models WHERE model_id = :id"),
-        {"id": model_id}
-    )
-    await db.commit()
-    return {"status": "success"}
-
-
-@app.get("/ml/models/best")
+@app.get("/api/models/best")
 async def get_best_model(db: AsyncSession = Depends(get_db)):
     """Récupère le meilleur modèle."""
     result = await db.execute(
@@ -730,7 +661,7 @@ async def get_best_model(db: AsyncSession = Depends(get_db)):
             SELECT model_id, model_type, accuracy, f1_score, roc_auc, pr_auc, created_at
             FROM models
             WHERE is_active = TRUE
-            ORDER BY accuracy DESC NULLS LAST, roc_auc DESC NULLS LAST
+            ORDER BY roc_auc DESC NULLS LAST
             LIMIT 1
         """)
     )
@@ -1160,9 +1091,8 @@ async def train_with_real_data(request: RealDataTrainRequest, db: AsyncSession =
         
         # 3. Split train/test
         from sklearn.model_selection import train_test_split
-        stratify = y if len(np.unique(y)) > 1 else None
         X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=42, stratify=stratify
+            X, y, test_size=0.2, random_state=42, stratify=y
         )
         
         # 4. Entraîner le meilleur modèle
@@ -1187,24 +1117,12 @@ async def train_with_real_data(request: RealDataTrainRequest, db: AsyncSession =
             "threshold": 0.5
         }, model_path)
         
-        # 6. Log dans MLflow avec nom descriptif
+        # 6. Log dans MLflow
         mlflow_run_id = None
         if HAS_MLFLOW:
             try:
-                # Nom descriptif: Type_Repo_Samples
-                model_type_display = {
-                    "xgb": "XGBoost",
-                    "lgbm": "LightGBM",
-                    "rf": "RandomForest",
-                    "logreg": "LogisticRegression",
-                    "gradient_boosting": "GradientBoosting",
-                    "ensemble": "Ensemble"
-                }.get(best_model_name, best_model_name)
-                run_name = f"{model_type_display}_repo_{request.repo_id}_{request.n_samples}samples"
-                
-                with mlflow.start_run(run_name=run_name):
-                    mlflow.log_param("model_type", model_type_display)
-                    mlflow.log_param("repo_id", request.repo_id)
+                with mlflow.start_run(run_name=f"real_data_{model_id}"):
+                    mlflow.log_param("model_type", best_model_name)
                     mlflow.log_param("n_samples", request.n_samples)
                     mlflow.log_param("target_accuracy", request.target_accuracy)
                     mlflow.log_metrics(best_metrics)
@@ -1213,8 +1131,8 @@ async def train_with_real_data(request: RealDataTrainRequest, db: AsyncSession =
             except Exception as e:
                 logger.warning(f"MLflow logging failed: {e}")
         
-        # 7. Sauvegarder en base (forcer labels=[0, 1] pour garantir une matrice 2x2)
-        cm = confusion_matrix(y_test, best_model.predict(X_test), labels=[0, 1])
+        # 7. Sauvegarder en base
+        cm = confusion_matrix(y_test, best_model.predict(X_test))
         confusion = {
             "tn": int(cm[0, 0]), "fp": int(cm[0, 1]),
             "fn": int(cm[1, 0]), "tp": int(cm[1, 1])

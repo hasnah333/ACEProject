@@ -11,10 +11,11 @@ import { GettingStartedPage } from './pages/docs/GettingStartedPage'
 import { ConnectingRepoPage } from './pages/docs/ConnectingRepoPage'
 import { RiskScorePage } from './pages/docs/RiskScorePage'
 import { ShapExplanationsPage } from './pages/docs/ShapExplanationsPage'
-import { PrioritizedTestPlanPage as DocsPrioritizedTestPlanPage } from './pages/docs/PrioritizedTestPlanPage'
+import { PrioritizedTestPlanPage } from './pages/docs/PrioritizedTestPlanPage'
 import { ConnectRepoPage } from './pages/ConnectRepoPage'
+import { MLPipelinePage } from './pages/MLPipelinePage'
 import { AdvancedDashboardPage } from './pages/AdvancedDashboardPage'
-import { PrioritizedTestPlanPage } from './pages/PrioritizedTestPlanPage'
+import { PrioritizedTestPlanPage as TestPlanPage } from './pages/PrioritizedTestPlanPage'
 import { AnalyseStatiquePage } from './pages/AnalyseStatiquePage'
 
 function App() {
@@ -30,8 +31,9 @@ function App() {
               <Route path="class/:id" element={<ClassPage />} />
               <Route path="models" element={<ModelsPage />} />
               <Route path="connect-repo" element={<ConnectRepoPage />} />
+              <Route path="ml-pipeline" element={<MLPipelinePage />} />
               <Route path="advanced-dashboard" element={<AdvancedDashboardPage />} />
-              <Route path="test-plan" element={<PrioritizedTestPlanPage />} />
+              <Route path="test-plan" element={<TestPlanPage />} />
               <Route path="analyse-statique" element={<AnalyseStatiquePage />} />
               <Route path="docs/getting-started" element={<GettingStartedPage />} />
               <Route path="docs/connecting-repo" element={<ConnectingRepoPage />} />
@@ -39,7 +41,7 @@ function App() {
               <Route path="docs/shap-explanations" element={<ShapExplanationsPage />} />
               <Route
                 path="docs/prioritised-test-plan"
-                element={<DocsPrioritizedTestPlanPage />}
+                element={<PrioritizedTestPlanPage />}
               />
             </Route>
           </Routes>

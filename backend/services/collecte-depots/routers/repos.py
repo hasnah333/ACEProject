@@ -192,7 +192,7 @@ async def collect_repo(repo_id: int, background_tasks: BackgroundTasks, db: Asyn
     """Lance la collecte des données d'un repository."""
     # Vérifier que le repo existe
     result = await db.execute(
-        text("SELECT id, url, provider, default_branch FROM repositories WHERE id = :id"),
+        text("SELECT id, url, provider FROM repositories WHERE id = :id"),
         {"id": repo_id}
     )
     row = result.fetchone()
@@ -202,7 +202,6 @@ async def collect_repo(repo_id: int, background_tasks: BackgroundTasks, db: Asyn
     
     repo_url = row[1]
     provider = row[2]
-    default_branch = row[3] or "main"
     
     # Simuler la collecte (en production, cela clonerait le repo et analyserait les commits)
     commits_collected = 0
@@ -222,60 +221,12 @@ async def collect_repo(repo_id: int, background_tasks: BackgroundTasks, db: Asyn
                 repo_name = parts[-1].replace(".git", "")
                 
                 try:
-                    async with httpx.AsyncClient(timeout=60.0) as client:
-                        headers = {"Accept": "application/vnd.github.v3+json"}
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        headers = {}
                         if settings.GITHUB_TOKEN:
                             headers["Authorization"] = f"token {settings.GITHUB_TOKEN}"
                         
-                        # 1. D'abord récupérer l'arborescence complète du dépôt
-                        logger.info(f"Fetching tree for {owner}/{repo_name} branch {default_branch}")
-                        tree_resp = await client.get(
-                            f"https://api.github.com/repos/{owner}/{repo_name}/git/trees/{default_branch}",
-                            headers=headers,
-                            params={"recursive": "1"}
-                        )
-                        
-                        if tree_resp.status_code == 200:
-                            tree_data = tree_resp.json()
-                            tree_items = tree_data.get("tree", [])
-                            
-                            # Nettoyer les anciens fichiers de ce repo
-                            await db.execute(text("DELETE FROM files WHERE repo_id = :id"), {"id": repo_id})
-                            
-                            # Insérer tous les fichiers (blobs) dans la base
-                            for item in tree_items:
-                                if item.get("type") == "blob":
-                                    filepath = item.get("path", "")
-                                    filename = filepath.split("/")[-1] if "/" in filepath else filepath
-                                    ext = "." + filename.split(".")[-1] if "." in filename else ""
-                                    
-                                    lang_map = {".py": "python", ".java": "java", ".js": "javascript", 
-                                               ".ts": "typescript", ".go": "go", ".cpp": "cpp", ".c": "c",
-                                               ".jsx": "javascript", ".tsx": "typescript"}
-                                    language = lang_map.get(ext, "other")
-                                    
-                                    try:
-                                        await db.execute(
-                                            text("""
-                                                INSERT INTO files (repo_id, filepath, filename, extension, language, status)
-                                                VALUES (:repo_id, :filepath, :filename, :ext, :lang, 'active')
-                                                ON CONFLICT DO NOTHING
-                                            """),
-                                            {
-                                                "repo_id": repo_id,
-                                                "filepath": filepath,
-                                                "filename": filename,
-                                                "ext": ext,
-                                                "lang": language
-                                            }
-                                        )
-                                        files_stored += 1
-                                    except Exception as e:
-                                        logger.warning(f"Failed to insert file {filepath}: {e}")
-                            
-                            logger.info(f"Stored {files_stored} files from tree")
-                        
-                        # 2. Récupérer les commits
+                        # Récupérer les commits
                         commits_resp = await client.get(
                             f"https://api.github.com/repos/{owner}/{repo_name}/commits",
                             headers=headers,
@@ -315,62 +266,6 @@ async def collect_repo(repo_id: int, background_tasks: BackgroundTasks, db: Asyn
                                         }
                                     )
                                     commits_stored += 1
-                                    
-                                    # Récupérer les fichiers modifiés par ce commit
-                                    try:
-                                        commit_detail_resp = await client.get(
-                                            f"https://api.github.com/repos/{owner}/{repo_name}/commits/{sha}",
-                                            headers=headers
-                                        )
-                                        if commit_detail_resp.status_code == 200:
-                                            commit_detail = commit_detail_resp.json()
-                                            files = commit_detail.get("files", [])
-                                            
-                                            commit_id_result = await db.execute(
-                                                text("SELECT id FROM commits WHERE repo_id = :repo_id AND sha = :sha"),
-                                                {"repo_id": repo_id, "sha": sha}
-                                            )
-                                            commit_id_row = commit_id_result.fetchone()
-                                            commit_id = commit_id_row[0] if commit_id_row else None
-                                            
-                                            for file in files[:20]:
-                                                filepath = file.get("filename", "")
-                                                if not filepath:
-                                                    continue
-                                                
-                                                filename = filepath.split("/")[-1]
-                                                ext = "." + filename.split(".")[-1] if "." in filename else ""
-                                                lang_map = {".py": "python", ".java": "java", ".js": "javascript", 
-                                                           ".ts": "typescript", ".go": "go", ".cpp": "cpp", ".c": "c"}
-                                                language = lang_map.get(ext, "other")
-                                                
-                                                try:
-                                                    await db.execute(
-                                                        text("""
-                                                            INSERT INTO files (repo_id, commit_id, filepath, filename, extension, language, 
-                                                                lines_added, lines_deleted, status)
-                                                            VALUES (:repo_id, :commit_id, :filepath, :filename, :ext, :lang,
-                                                                :added, :deleted, :status)
-                                                            ON CONFLICT DO NOTHING
-                                                        """),
-                                                        {
-                                                            "repo_id": repo_id,
-                                                            "commit_id": commit_id,
-                                                            "filepath": filepath,
-                                                            "filename": filename,
-                                                            "ext": ext,
-                                                            "lang": language,
-                                                            "added": file.get("additions", 0),
-                                                            "deleted": file.get("deletions", 0),
-                                                            "status": file.get("status", "modified")
-                                                        }
-                                                    )
-                                                    files_stored += 1
-                                                except Exception as e:
-                                                    logger.warning(f"Failed to insert file {filepath}: {e}")
-                                    except Exception as e:
-                                        logger.warning(f"Failed to get commit details for {sha}: {e}")
-                                        
                                 except Exception as e:
                                     logger.error(f"Failed to insert commit {sha}: {e}")
                                     continue
@@ -381,37 +276,13 @@ async def collect_repo(repo_id: int, background_tasks: BackgroundTasks, db: Asyn
         # Si GitHub n'est pas disponible, générer des données de démonstration
         if not github_success:
             logger.info("Generating demo data for repository")
-            
-            # Générer des noms de fichiers réalistes basés sur le nom du repo
-            repo_result = await db.execute(
-                text("SELECT name FROM repositories WHERE id = :id"),
-                {"id": repo_id}
-            )
-            repo_row = repo_result.fetchone()
-            repo_name_clean = (repo_row[0] if repo_row else "project").replace("-", "_").lower()
-            
-            demo_files = [
-                f"src/main/java/com/{repo_name_clean}/Application.java",
-                f"src/main/java/com/{repo_name_clean}/controller/MainController.java",
-                f"src/main/java/com/{repo_name_clean}/service/UserService.java",
-                f"src/main/java/com/{repo_name_clean}/repository/DataRepository.java",
-                f"src/main/java/com/{repo_name_clean}/config/SecurityConfig.java",
-                f"src/main/python/{repo_name_clean}/analyzer.py",
-                f"src/main/python/{repo_name_clean}/utils.py",
-                f"src/test/java/com/{repo_name_clean}/ApplicationTest.java",
-                "pom.xml",
-                "Dockerfile",
-                "docker-compose.yml",
-                "README.md"
-            ]
-            
             demo_commits = [
                 {"sha": f"demo{i}abc123def456", "message": f"Demo commit {i}: {'Fix bug' if i % 3 == 0 else 'Feature update'}", 
                  "author_name": "Demo Author", "author_email": "demo@example.com", "is_bugfix": i % 3 == 0}
                 for i in range(20)
             ]
             
-            for idx, commit in enumerate(demo_commits):
+            for commit in demo_commits:
                 try:
                     await db.execute(
                         text("""
@@ -429,47 +300,6 @@ async def collect_repo(repo_id: int, background_tasks: BackgroundTasks, db: Asyn
                         }
                     )
                     commits_stored += 1
-                    
-                    # Récupérer l'ID du commit
-                    commit_id_result = await db.execute(
-                        text("SELECT id FROM commits WHERE repo_id = :repo_id AND sha = :sha"),
-                        {"repo_id": repo_id, "sha": commit["sha"]}
-                    )
-                    commit_id_row = commit_id_result.fetchone()
-                    commit_id = commit_id_row[0] if commit_id_row else None
-                    
-                    # Ajouter quelques fichiers par commit
-                    for filepath in demo_files[idx % len(demo_files) : idx % len(demo_files) + 3]:
-                        filename = filepath.split("/")[-1]
-                        ext = "." + filename.split(".")[-1] if "." in filename else ""
-                        lang_map = {".py": "python", ".java": "java", ".js": "javascript", 
-                                   ".xml": "xml", ".yml": "yaml", ".md": "markdown"}
-                        language = lang_map.get(ext, "other")
-                        
-                        try:
-                            await db.execute(
-                                text("""
-                                    INSERT INTO files (repo_id, commit_id, filepath, filename, extension, language, 
-                                        lines_added, lines_deleted, status)
-                                    VALUES (:repo_id, :commit_id, :filepath, :filename, :ext, :lang, :added, :deleted, :status)
-                                    ON CONFLICT DO NOTHING
-                                """),
-                                {
-                                    "repo_id": repo_id,
-                                    "commit_id": commit_id,
-                                    "filepath": filepath,
-                                    "filename": filename,
-                                    "ext": ext,
-                                    "lang": language,
-                                    "added": 10 + idx * 2,
-                                    "deleted": 5 + idx,
-                                    "status": "modified"
-                                }
-                            )
-                            files_stored += 1
-                        except Exception as e:
-                            logger.warning(f"Failed to insert demo file: {e}")
-                            
                 except Exception as e:
                     logger.error(f"Failed to insert demo commit: {e}")
             

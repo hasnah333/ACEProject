@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import { UiCard } from '../components/ui/UiCard'
 import { useRepos } from '../context/RepoContext'
 import { createRepo, collectRepo } from '../services/api/repoService'
-import { analyseStatiqueClient } from '../services/api/client'
 
 export function ConnectRepoPage() {
   const navigate = useNavigate()
@@ -12,7 +11,6 @@ export function ConnectRepoPage() {
   const [url, setUrl] = useState('')
   const [defaultBranch, setDefaultBranch] = useState('main')
   const [loading, setLoading] = useState(false)
-  const [status, setStatus] = useState<string>('')
   const [error, setError] = useState<string | null>(null)
 
   const handleSubmit = async (e: FormEvent) => {
@@ -21,7 +19,6 @@ export function ConnectRepoPage() {
 
     setLoading(true)
     setError(null)
-    setStatus('Création du dépôt...')
 
     try {
       // 1. Créer le repo dans le backend
@@ -32,32 +29,19 @@ export function ConnectRepoPage() {
         provider: 'github'
       })
 
-      // 2. Collecter les fichiers du repo depuis GitHub
-      setStatus('Collecte des fichiers depuis GitHub...')
+      // 2. Collecter les données du repo
       try {
-        const collectResult = await collectRepo(backendRepo.id)
-        console.log('Collection result:', collectResult)
-        setStatus(`${collectResult.files_stored || 0} fichiers collectés. Analyse en cours...`)
+        await collectRepo(backendRepo.id)
       } catch (collectError) {
-        console.warn('Collection failed:', collectError)
-        setStatus('Collecte échouée, tentative d\'analyse...')
+        console.warn('Collection failed, but repo was created:', collectError)
       }
 
-      // 3. Lancer l'analyse statique automatiquement
-      setStatus('Analyse statique en cours...')
-      try {
-        await analyseStatiqueClient.post('/analyze', { repo_id: backendRepo.id })
-        setStatus('Analyse terminée !')
-      } catch (analyzeError) {
-        console.warn('Analysis failed:', analyzeError)
-      }
-
-      // 4. Ajouter au contexte local
+      // 3. Ajouter au contexte local
       const repo = addRepo({
         name: repoName,
         url,
         defaultBranch,
-      }, backendRepo.id)
+      }, backendRepo.id.toString())
 
       navigate(`/repo/${encodeURIComponent(repo.id)}`)
     } catch (err: any) {
@@ -65,7 +49,6 @@ export function ConnectRepoPage() {
       console.error('Failed to create repo:', err)
     } finally {
       setLoading(false)
-      setStatus('')
     }
   }
 
@@ -142,11 +125,6 @@ export function ConnectRepoPage() {
           >
             {loading ? 'Connecting...' : 'Connect repo'}
           </button>
-          {status && (
-            <p className="text-sm text-indigo-600 dark:text-indigo-400 animate-pulse mt-2">
-              {status}
-            </p>
-          )}
         </form>
       </UiCard>
     </div>

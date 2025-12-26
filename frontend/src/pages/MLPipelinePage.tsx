@@ -275,85 +275,39 @@ export function MLPipelinePage() {
               <div>
                 <h3 className="font-medium mb-2">Collection</h3>
                 <div className="text-sm text-slate-600 dark:text-slate-400">
-                  Commits: {result.collection?.commits_stored || 0} |
-                  Files: {result.collection?.files_stored || 0} |
-                  Issues: {result.collection?.issues_stored || 0}
+                  Commits: {result.collection.commits_stored} |
+                  Files: {result.collection.files_stored} |
+                  Issues: {result.collection.issues_stored}
                 </div>
               </div>
 
               <div>
                 <h3 className="font-medium mb-2">Features</h3>
                 <div className="text-sm text-slate-600 dark:text-slate-400">
-                  Dataset ID: {result.features?.dataset_id || 'N/A'} |
-                  Features: {result.features?.n_features || 0} |
-                  Train: {result.features?.train_samples || 0} |
-                  Test: {result.features?.test_samples || 0}
+                  Dataset ID: {result.features.dataset_id} |
+                  Features: {result.features.n_features} |
+                  Train: {result.features.train_samples} |
+                  Test: {result.features.test_samples}
                 </div>
               </div>
 
               <div>
-                <h3 className="font-medium mb-2">Trained Model</h3>
-                <div className="bg-green-50 dark:bg-green-900/20 p-3 rounded-lg">
-                  <div className="grid grid-cols-2 gap-2 text-sm">
-                    <div>
-                      <span className="text-slate-500">Model ID:</span>
-                      <span className="ml-2 font-mono text-green-700 dark:text-green-400">
-                        {result.training?.model_id || 'N/A'}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-slate-500">Type:</span>
-                      <span className="ml-2 font-semibold">
-                        {result.training?.model_type || 'Unknown'}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-slate-500">Accuracy:</span>
-                      <span className="ml-2 font-semibold text-green-600 dark:text-green-400">
-                        {((result.training?.metrics?.accuracy || 0) * 100).toFixed(1)}%
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-slate-500">F1 Score:</span>
-                      <span className="ml-2 font-semibold">
-                        {(result.training?.metrics?.f1 || 0).toFixed(3)}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-slate-500">Recall:</span>
-                      <span className="ml-2 font-semibold">
-                        {(result.training?.metrics?.recall || 0).toFixed(3)}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-slate-500">ROC-AUC:</span>
-                      <span className="ml-2 font-semibold">
-                        {(result.training?.metrics?.roc_auc || 0).toFixed(3)}
-                      </span>
-                    </div>
-                  </div>
+                <h3 className="font-medium mb-2">Training</h3>
+                <div className="text-sm text-slate-600 dark:text-slate-400">
+                  Model: {result.training.model_type} |
+                  Accuracy: {(result.training.metrics.accuracy * 100).toFixed(1)}% |
+                  F1: {result.training.metrics.f1.toFixed(3)} |
+                  Recall: {result.training.metrics.recall.toFixed(3)}
                 </div>
-                <a
-                  href="/models"
-                  className="inline-flex items-center mt-3 text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400"
-                >
-                  Voir tous les modèles →
-                </a>
               </div>
 
               {result.prioritization && (
                 <div>
                   <h3 className="font-medium mb-2">Prioritization</h3>
                   <div className="text-sm text-slate-600 dark:text-slate-400">
-                    Selected: {result.prioritization.summary?.items_selected || 0} / {result.prioritization.summary?.items_total || 0} |
-                    Effort: {result.prioritization.summary?.effort_selected || 0} / {result.prioritization.summary?.budget || 0}
+                    Selected: {result.prioritization.summary.items_selected} / {result.prioritization.summary.items_total} |
+                    Effort: {result.prioritization.summary.effort_selected} / {result.prioritization.summary.budget}
                   </div>
-                  <a
-                    href="/test-plan"
-                    className="inline-flex items-center mt-2 text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400"
-                  >
-                    Voir le Plan de Tests →
-                  </a>
                 </div>
               )}
             </div>

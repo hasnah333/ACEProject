@@ -44,12 +44,6 @@ export const priorisationClient = axios.create({
   timeout: 30_000,
 })
 
-// Client pour l'analyse statique
-export const analyseStatiqueClient = axios.create({
-  baseURL: API_CONFIG.ANALYSE_STATIQUE_URL || 'http://localhost:8005',
-  timeout: 120_000,
-})
-
 // Client par défaut (pour compatibilité)
 export const apiClient = backendClient
 
@@ -67,7 +61,6 @@ backendClient.interceptors.request.use(addAuthToken)
 mlServiceClient.interceptors.request.use(addAuthToken)
 pretraitementClient.interceptors.request.use(addAuthToken)
 priorisationClient.interceptors.request.use(addAuthToken)
-analyseStatiqueClient.interceptors.request.use(addAuthToken)
 
 // Intercepteur pour les erreurs
 const handleError = (error: AxiosError) => {
@@ -87,7 +80,6 @@ backendClient.interceptors.response.use((response: any) => response, handleError
 mlServiceClient.interceptors.response.use((response: any) => response, handleError)
 pretraitementClient.interceptors.response.use((response: any) => response, handleError)
 priorisationClient.interceptors.response.use((response: any) => response, handleError)
-analyseStatiqueClient.interceptors.response.use((response: any) => response, handleError)
 
 /**
  * Helper to drive a simple loading/data/error state machine outside React.
