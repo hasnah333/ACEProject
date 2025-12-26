@@ -524,6 +524,10 @@ async def analyze_repository(request: AnalyzeRequest, db: AsyncSession = Depends
         logger.info("No files found, generating synthetic metrics")
         return await generate_synthetic_metrics(db, request.repo_id)
     
+    # Nettoyer les anciens résultats pour ce repo
+    await db.execute(text("DELETE FROM file_metrics WHERE repo_id = :id"), {"id": request.repo_id})
+    await db.execute(text("DELETE FROM code_smells WHERE repo_id = :id"), {"id": request.repo_id})
+    
     metrics_results = []
     total_smells = 0
     
@@ -579,6 +583,25 @@ async def analyze_repository(request: AnalyzeRequest, db: AsyncSession = Depends
             )
         except Exception as e:
             logger.warning(f"Failed to save metrics for {filepath}: {e}")
+            
+        # Sauvegarder les smells
+        for smell in metrics.get("code_smells", []):
+            try:
+                await db.execute(
+                    text("""
+                        INSERT INTO code_smells (repo_id, filepath, smell_type, severity, message)
+                        VALUES (:repo_id, :filepath, :type, :severity, :msg)
+                    """),
+                    {
+                        "repo_id": request.repo_id,
+                        "filepath": filepath,
+                        "type": smell["smell_type"],
+                        "severity": smell["severity"],
+                        "msg": smell["message"]
+                    }
+                )
+            except Exception as e:
+                logger.warning(f"Failed to save smell for {filepath}: {e}")
         
         metrics_results.append(FileMetricsResult(
             filepath=filepath,
@@ -619,15 +642,30 @@ async def generate_synthetic_metrics(db: AsyncSession, repo_id: int) -> AnalyzeR
     """Génère des métriques synthétiques pour la démonstration."""
     import random
     
-    synthetic_files = [
-        "src/main/java/com/example/UserService.java",
-        "src/main/java/com/example/OrderController.java",
-        "src/main/java/com/example/ProductRepository.java",
-        "src/main/java/com/example/AuthenticationFilter.java",
-        "src/main/java/com/example/DataProcessor.java",
-        "src/main/python/utils/helpers.py",
-        "src/main/python/services/ml_engine.py",
-    ]
+    # Récupérer le nom du repo
+    repo_result = await db.execute(text("SELECT name FROM repositories WHERE id = :id"), {"id": repo_id})
+    repo_name = repo_result.scalar() or "project"
+    
+    # Essayer de récupérer de vrais fichiers en base quel que soit l'extension ou le commit
+    real_files_result = await db.execute(
+        text("SELECT DISTINCT filepath FROM files WHERE repo_id = :id LIMIT 10"),
+        {"id": repo_id}
+    )
+    real_paths = [r[0] for r in real_files_result.fetchall()]
+    
+    if real_paths:
+        synthetic_files = real_paths
+    else:
+        # Fallback sur une liste typique si vraiment rien n'est trouvé
+        synthetic_files = [
+            f"src/main/java/com/ace/{repo_name.lower()}/UserService.java",
+            f"src/main/java/com/ace/{repo_name.lower()}/AppController.java",
+            f"src/main/java/com/ace/{repo_name.lower()}/DataModel.java",
+            f"src/main/python/analyze_{repo_name.lower()}.py",
+            "src/utils/helpers.js",
+            "README.md",
+            "Dockerfile"
+        ]
     
     metrics_results = []
     total_smells = 0
@@ -702,6 +740,26 @@ async def generate_synthetic_metrics(db: AsyncSession, repo_id: int) -> AnalyzeR
             )
         except Exception as e:
             logger.warning(f"Failed to save synthetic metrics: {e}")
+            
+        # Sauvegarder les smells synthétiques
+        if "code_smells" in metrics:
+            for smell in metrics["code_smells"]:
+                try:
+                    await db.execute(
+                        text("""
+                            INSERT INTO code_smells (repo_id, filepath, smell_type, severity, message)
+                            VALUES (:repo_id, :filepath, :type, :severity, :msg)
+                        """),
+                        {
+                            "repo_id": repo_id,
+                            "filepath": filepath,
+                            "type": smell["smell_type"],
+                            "severity": smell["severity"],
+                            "msg": smell["message"]
+                        }
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to save synthetic smell: {e}")
     
     await db.commit()
     
@@ -723,12 +781,17 @@ def generate_synthetic_file_metrics(filepath: str, extension: str) -> Dict[str, 
     num_methods = random.randint(3, 25)
     cc_values = [random.randint(1, 15) for _ in range(num_methods)]
     
+    # Calculer des métriques différenciées
+    total_cc = sum(cc_values)
+    max_cc = max(cc_values) if cc_values else 0
+    avg_cc = total_cc / len(cc_values) if cc_values else 0
+    
     metrics = {
         "language": language,
-        "cyclomatic_complexity": sum(cc_values),
-        "max_cyclomatic_complexity": max(cc_values) if cc_values else 0,
-        "avg_cyclomatic_complexity": sum(cc_values) / len(cc_values) if cc_values else 0,
-        "wmc": sum(cc_values),
+        "cyclomatic_complexity": total_cc,
+        "max_cyclomatic_complexity": max_cc,
+        "avg_cyclomatic_complexity": avg_cc,
+        "wmc": total_cc * random.uniform(0.8, 1.5), # Différencier WMC de CC
         "dit": random.randint(0, 5),
         "noc": random.randint(0, 3),
         "cbo": random.randint(2, 15),

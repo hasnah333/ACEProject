@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { backendClient } from '../../services/api/client'
+import { backendClient, analyseStatiqueClient } from '../../services/api/client'
 
 interface Module {
   id: string
@@ -9,6 +9,10 @@ interface Module {
   defects: number
   riskScore: number
   trend: 'up' | 'down' | 'stable'
+}
+
+interface ModuleQualityTableProps {
+  repoId?: string
 }
 
 function getCoverageColor(coverage: number) {
@@ -33,45 +37,114 @@ function getTrendIcon(trend: string) {
 
 // Données par défaut
 const defaultModules: Module[] = [
-  { id: '1', name: 'auth', coverage: 96, defects: 1, riskScore: 0.12, trend: 'up' },
-  { id: '2', name: 'billing', coverage: 81, defects: 4, riskScore: 0.67, trend: 'down' },
-  { id: '3', name: 'api', coverage: 88, defects: 2, riskScore: 0.34, trend: 'up' },
-  { id: '4', name: 'core', coverage: 92, defects: 0, riskScore: 0.08, trend: 'stable' },
-  { id: '5', name: 'utils', coverage: 78, defects: 3, riskScore: 0.45, trend: 'down' },
+  { id: '1', name: 'src', coverage: 85, defects: 2, riskScore: 0.25, trend: 'up' },
+  { id: '2', name: 'lib', coverage: 72, defects: 3, riskScore: 0.45, trend: 'stable' },
+  { id: '3', name: 'utils', coverage: 78, defects: 1, riskScore: 0.30, trend: 'up' },
+  { id: '4', name: 'core', coverage: 90, defects: 0, riskScore: 0.12, trend: 'stable' },
 ]
 
-export function ModuleQualityTable() {
+export function ModuleQualityTable({ repoId }: ModuleQualityTableProps) {
   const [modules, setModules] = useState<Module[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     loadModules()
-  }, [])
+  }, [repoId])
 
   const loadModules = async () => {
     setLoading(true)
     try {
-      // Essayer de charger les repos depuis le backend
-      const response = await backendClient.get('/api/repos')
-      const repos = Array.isArray(response.data) ? response.data : (response.data?.repos || [])
+      // Déterminer le repoId à utiliser
+      let targetRepoId = repoId
 
-      if (repos.length > 0) {
-        // Convertir les repos en format module
-        const repoModules = repos.map((repo: any, index: number) => ({
-          id: repo.id?.toString() || index.toString(),
-          name: repo.name || `Repo ${index + 1}`,
-          coverage: repo.coverage || Math.floor(Math.random() * 30) + 70,
-          defects: repo.open_defects || Math.floor(Math.random() * 5),
-          riskScore: repo.risk_score || Math.random() * 0.8,
-          trend: repo.trend || (Math.random() > 0.5 ? 'up' : Math.random() > 0.5 ? 'down' : 'stable')
-        }))
-        setModules(repoModules)
-      } else {
-        // Pas de repos, utiliser les données par défaut
-        setModules(defaultModules)
+      if (!targetRepoId) {
+        const reposResponse = await backendClient.get('/api/repos').catch(() => null)
+        const repos = reposResponse?.data?.repos || []
+        if (repos.length > 0) {
+          targetRepoId = repos[0].id?.toString()
+        }
       }
+
+      if (!targetRepoId) {
+        setModules(defaultModules)
+        return
+      }
+
+      // 2. Charger les métriques depuis l'analyse statique
+      const metricsResponse = await analyseStatiqueClient.get(`/metrics/${targetRepoId}`).catch(() => null)
+      const allMetrics = metricsResponse?.data?.metrics || metricsResponse?.data || []
+
+      // Filtrer pour ne garder que les fichiers de code source
+      const codeExtensions = ['.java', '.py', '.js', '.jsx', '.ts', '.tsx', '.c', '.cpp', '.h', '.cs', '.go', '.rb', '.php', '.swift', '.kt', '.scala']
+      const metrics = allMetrics.filter((m: any) => {
+        const filepath = (m.filepath || '').toLowerCase()
+        return codeExtensions.some(ext => filepath.endsWith(ext))
+      })
+
+      if (!Array.isArray(metrics) || metrics.length === 0) {
+        setModules(defaultModules)
+        return
+      }
+
+      // 3. Grouper par module (extraire le nom du service/module)
+      const moduleMap: Record<string, { files: number, totalLoc: number, totalComplexity: number, smells: number }> = {}
+
+      metrics.forEach((m: any) => {
+        const filepath = m.filepath || ''
+        const parts = filepath.split('/').filter((p: string) => p && p !== 'src' && p !== 'main' && p !== 'java' && p !== 'test')
+
+        // Extraire le nom du module/service
+        let moduleName = 'root'
+
+        if (parts.length > 0) {
+          const firstDir = parts[0]
+          // Si c'est un nom de service (contient un tiret ou finit par service/server)
+          if (firstDir.includes('-') || firstDir.includes('service') || firstDir.includes('server') || firstDir.includes('client')) {
+            moduleName = firstDir
+          } else if (parts.length > 1) {
+            const significant = parts.find((p: string) =>
+              p.includes('-') || p.includes('service') || p.includes('server') || p.includes('controller')
+            )
+            moduleName = significant || parts[0]
+          } else {
+            // Utiliser le nom du fichier sans extension
+            moduleName = filepath.split('/').pop()?.replace(/\.[^/.]+$/, '') || 'root'
+          }
+        }
+
+        if (!moduleMap[moduleName]) {
+          moduleMap[moduleName] = { files: 0, totalLoc: 0, totalComplexity: 0, smells: 0 }
+        }
+        moduleMap[moduleName].files++
+        moduleMap[moduleName].totalLoc += m.loc || 0
+        moduleMap[moduleName].totalComplexity += m.cyclomatic_complexity || 0
+        moduleMap[moduleName].smells += m.code_smells_count || 0
+      })
+
+      // 4. Convertir en format Module
+      const dynamicModules: Module[] = Object.entries(moduleMap)
+        .slice(0, 8) // Max 8 modules
+        .map(([name, data], index) => {
+          const avgComplexity = data.files > 0 ? data.totalComplexity / data.files : 0
+          // Calculer un score de risque basé sur les métriques réelles
+          const riskScore = Math.min(1, (avgComplexity / 30) * 0.5 + (data.smells / 10) * 0.5)
+          // Simuler une couverture (car pas de vraies données de tests)
+          const coverage = Math.max(50, 100 - avgComplexity * 2 - data.smells)
+
+          return {
+            id: (index + 1).toString(),
+            name,
+            coverage: Math.round(coverage),
+            defects: data.smells,
+            riskScore,
+            trend: (riskScore < 0.3 ? 'up' : riskScore > 0.6 ? 'down' : 'stable') as 'up' | 'down' | 'stable'
+          }
+        })
+        .sort((a, b) => b.coverage - a.coverage)
+
+      setModules(dynamicModules.length > 0 ? dynamicModules : defaultModules)
     } catch (error) {
-      console.log('Using default module data')
+      console.log('Using default module data:', error)
       setModules(defaultModules)
     } finally {
       setLoading(false)

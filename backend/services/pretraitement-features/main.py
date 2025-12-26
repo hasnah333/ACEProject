@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379"
     MLFLOW_TRACKING_URI: str = "http://localhost:5000"
     DATASETS_PATH: str = "./datasets"
+    FEATURES_PATH: str = "./features"
     
     class Config:
         env_file = ".env"
@@ -58,6 +59,7 @@ async def get_db():
 async def lifespan(app: FastAPI):
     logger.info("Starting Pretraitement-Features service...")
     os.makedirs(settings.DATASETS_PATH, exist_ok=True)
+    os.makedirs(settings.FEATURES_PATH, exist_ok=True)
     yield
     logger.info("Shutting down Pretraitement-Features service...")
 
@@ -247,6 +249,31 @@ async def generate_features(request: FeatureGenerationRequest, db: AsyncSession 
         # Déterminer le label (is_buggy) basé sur l'historique des bugs
         df = await add_bug_labels(db, df, repo_id)
         
+        # Sauvegarder les features brutes dans le dossier features/
+        os.makedirs(settings.FEATURES_PATH, exist_ok=True)
+        feature_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        raw_features_path = f"{settings.FEATURES_PATH}/features_repo{repo_id}_{feature_timestamp}.csv"
+        df.to_csv(raw_features_path, index=False)
+        logger.info(f"Raw features saved to {raw_features_path}")
+        
+        # Sauvegarder aussi les métadonnées des features
+        feature_meta = {
+            "repo_id": repo_id,
+            "created_at": datetime.now().isoformat(),
+            "n_samples": len(df),
+            "n_features": len([f["name"] for f in FEATURE_SCHEMA]),
+            "feature_names": [f["name"] for f in FEATURE_SCHEMA],
+            "file_path": raw_features_path,
+            "stats": {
+                col: {"mean": float(df[col].mean()), "std": float(df[col].std()), "min": float(df[col].min()), "max": float(df[col].max())}
+                for col in df.select_dtypes(include=[np.number]).columns if col not in ["file_id", "is_buggy"]
+            }
+        }
+        meta_path = f"{settings.FEATURES_PATH}/features_repo{repo_id}_{feature_timestamp}_meta.json"
+        with open(meta_path, "w") as f:
+            json.dump(feature_meta, f, indent=2)
+        logger.info(f"Feature metadata saved to {meta_path}")
+        
         # Split temporal ou random
         if request.use_temporal_split and len(df) > 10:
             split_idx = int(len(df) * (1 - request.test_ratio))
@@ -279,7 +306,9 @@ async def generate_features(request: FeatureGenerationRequest, db: AsyncSession 
         )
         
     except Exception as e:
+        import traceback
         logger.error(f"Feature generation failed: {e}")
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -326,6 +355,27 @@ async def generate_synthetic_dataset(db: AsyncSession, repo_id: int, request: Fe
         0.02 * np.clip(df["bug_history"] / 5, 0, 1)
     )
     df["is_buggy"] = (np.random.random(n_samples) < bug_prob).astype(int)
+    
+    # Sauvegarder les features brutes synthétiques dans le dossier features/
+    os.makedirs(settings.FEATURES_PATH, exist_ok=True)
+    feature_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    raw_features_path = f"{settings.FEATURES_PATH}/synthetic_repo{repo_id}_{feature_timestamp}.csv"
+    df.to_csv(raw_features_path, index=False)
+    logger.info(f"Synthetic raw features saved to {raw_features_path}")
+    
+    # Sauvegarder les métadonnées
+    feature_meta = {
+        "repo_id": repo_id,
+        "created_at": datetime.now().isoformat(),
+        "n_samples": len(df),
+        "n_features": len(FEATURE_SCHEMA),
+        "feature_names": [f["name"] for f in FEATURE_SCHEMA],
+        "file_path": raw_features_path,
+        "is_synthetic": True
+    }
+    meta_path = f"{settings.FEATURES_PATH}/synthetic_repo{repo_id}_{feature_timestamp}_meta.json"
+    with open(meta_path, "w") as f:
+        json.dump(feature_meta, f, indent=2)
     
     # Split
     split_idx = int(len(df) * 0.8)
@@ -422,9 +472,11 @@ async def add_bug_labels(db: AsyncSession, df: pd.DataFrame, repo_id: int) -> pd
     df["is_buggy"] = df["filepath"].map(lambda x: 1 if x in buggy_files else 0)
     
     # Si pas assez de bugs, ajouter du bruit pour la démo
-    if df["is_buggy"].sum() < 5:
+    if df["is_buggy"].sum() < 5 and len(df) > 0:
         np.random.seed(42)
-        noise_idx = np.random.choice(df.index, size=max(5, int(len(df) * 0.15)), replace=False)
+        # S'assurer que size ne dépasse pas len(df)
+        sample_size = min(len(df), max(5, int(len(df) * 0.15)))
+        noise_idx = np.random.choice(df.index, size=sample_size, replace=False)
         df.loc[noise_idx, "is_buggy"] = 1
     
     return df
@@ -481,17 +533,24 @@ async def list_datasets(db: AsyncSession = Depends(get_db)):
         text("SELECT id, train_samples, test_samples, n_features, feature_names, created_at FROM datasets ORDER BY created_at DESC")
     )
     rows = result.fetchall()
-    return [
-        DatasetInfo(
+    
+    datasets = []
+    for row in rows:
+        feat_names = row[4]
+        if isinstance(feat_names, str):
+            feat_names = json.loads(feat_names)
+        elif feat_names is None:
+            feat_names = []
+            
+        datasets.append(DatasetInfo(
             dataset_id=row[0],
             train_samples=row[1],
             test_samples=row[2],
             n_features=row[3],
-            feature_names=json.loads(row[4]) if row[4] else [],
+            feature_names=feat_names,
             created_at=row[5].isoformat() if row[5] else ""
-        )
-        for row in rows
-    ]
+        ))
+    return datasets
 
 
 @app.get("/datasets/{dataset_id}", response_model=DatasetInfo)
@@ -509,12 +568,18 @@ async def get_dataset_info(dataset_id: int, db: AsyncSession = Depends(get_db)):
     if not row:
         raise HTTPException(status_code=404, detail="Dataset not found")
     
+    feat_names = row[4]
+    if isinstance(feat_names, str):
+        feat_names = json.loads(feat_names)
+    elif feat_names is None:
+        feat_names = []
+
     return DatasetInfo(
         dataset_id=row[0],
         train_samples=row[1],
         test_samples=row[2],
         n_features=row[3],
-        feature_names=json.loads(row[4]) if row[4] else [],
+        feature_names=feat_names,
         created_at=row[5].isoformat() if row[5] else ""
     )
 

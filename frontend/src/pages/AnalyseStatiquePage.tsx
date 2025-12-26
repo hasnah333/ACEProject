@@ -7,8 +7,7 @@ import {
     PieChart, Pie, Cell, ScatterChart, Scatter, ZAxis
 } from 'recharts'
 
-import { listRepos } from '../services/api/repoService'
-import type { Repo } from '../services/api/repoService'
+import { useRepos } from '../context/RepoContext'
 
 // Types
 interface FileMetrics {
@@ -55,119 +54,142 @@ const SEVERITY_COLORS: Record<string, string> = {
 
 export function AnalyseStatiquePage() {
     const [loading, setLoading] = useState(true)
-    const [repos, setRepos] = useState<Repo[]>([])
-    const [selectedRepoId, setSelectedRepoId] = useState<number | null>(null)
+    // Utiliser le contexte global au lieu de l'état local
+    const { repos, selectedRepoId, setSelectedRepoId } = useRepos()
     const [metrics, setMetrics] = useState<FileMetrics[]>([])
     const [smells, setSmells] = useState<CodeSmell[]>([])
     const [summary, setSummary] = useState<AnalysisSummary | null>(null)
     const [analyzing, setAnalyzing] = useState(false)
 
+    // Sélectionner le premier repo si aucun n'est sélectionné
     useEffect(() => {
-        const loadRepos = async () => {
-            try {
-                const list = await listRepos()
-                setRepos(list)
-                if (list.length > 0) {
-                    setSelectedRepoId(list[0].id)
-                }
-            } catch (e) {
-                console.error('Failed to load repos:', e)
-            }
+        if (repos.length > 0 && !selectedRepoId) {
+            setSelectedRepoId(repos[0].id)
         }
-        loadRepos()
-    }, [])
+    }, [repos, selectedRepoId, setSelectedRepoId])
 
     useEffect(() => {
         if (selectedRepoId) {
-            loadData()
+            // Réinitialiser les données avant de charger les nouvelles
+            setMetrics([])
+            setSmells([])
+            setSummary(null)
+            loadData(selectedRepoId)
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [selectedRepoId])
 
-    const loadData = async () => {
+    const loadData = async (repoId: number) => {
+        if (!repoId) return
+
         setLoading(true)
+        let hasRealData = false
+
         try {
-            // Essayer de charger les données réelles
-            await Promise.all([
-                loadMetrics(),
-                loadSmells(),
-                loadSummary()
-            ])
+            // Charger les métriques réelles
+            const metricsResult = await loadMetrics(repoId)
+            if (metricsResult && metricsResult.length > 0) {
+                hasRealData = true
+            }
+
+            // Charger les smells
+            await loadSmells(repoId)
+
+            // Charger le résumé
+            await loadSummary(repoId)
+
         } catch (error) {
-            console.log('Loading demo data')
-            loadDemoData()
-        } finally {
-            setLoading(false)
+            console.error('Error loading data:', error)
         }
+
+        // Si aucune donnée réelle n'a été chargée, utiliser les données de démo
+        if (!hasRealData) {
+            console.log('No real data found, loading demo data for repo:', repoId)
+            loadDemoData(repoId)
+        }
+
+        setLoading(false)
     }
 
-    const loadMetrics = async () => {
+    // Extensions de fichiers de code source
+    const CODE_EXTENSIONS = ['.java', '.py', '.js', '.jsx', '.ts', '.tsx', '.c', '.cpp', '.h', '.cs', '.go', '.rb', '.php', '.swift', '.kt', '.scala']
+
+    const isCodeFile = (filepath: string): boolean => {
+        const lower = filepath.toLowerCase()
+        return CODE_EXTENSIONS.some(ext => lower.endsWith(ext))
+    }
+
+    const loadMetrics = async (repoId: number): Promise<FileMetrics[]> => {
         try {
-            const response = await analyseStatiqueClient.get(`/metrics/${selectedRepoId}`)
-            if (response.data?.metrics) {
-                setMetrics(response.data.metrics)
-            } else if (Array.isArray(response.data)) {
-                setMetrics(response.data)
+            console.log('Loading metrics for repo:', repoId)
+            const response = await analyseStatiqueClient.get(`/metrics/${repoId}`)
+            const metricsData = response.data?.metrics || response.data || []
+            if (Array.isArray(metricsData) && metricsData.length > 0) {
+                // Filtrer pour ne garder que les fichiers de code source
+                const codeMetrics = metricsData.filter((m: FileMetrics) => isCodeFile(m.filepath))
+                console.log('Loaded', codeMetrics.length, 'code files for repo', repoId, '(filtered from', metricsData.length, ')')
+                setMetrics(codeMetrics)
+                return codeMetrics
             }
-        } catch {
-            // Ignorer et utiliser les données de démo
+        } catch (e) {
+            console.warn('Failed to load metrics:', e)
         }
+        return []
     }
 
-    const loadSmells = async () => {
+    const loadSmells = async (repoId: number) => {
         try {
-            const response = await analyseStatiqueClient.get(`/smells/${selectedRepoId}`)
-            if (response.data?.smells) {
-                setSmells(response.data.smells)
-            } else if (Array.isArray(response.data)) {
-                setSmells(response.data)
+            const response = await analyseStatiqueClient.get(`/smells/${repoId}`)
+            const smellsData = response.data?.smells || response.data || []
+            if (Array.isArray(smellsData)) {
+                // Filtrer pour ne garder que les smells sur les fichiers de code
+                const codeSmells = smellsData.filter((s: CodeSmell) => isCodeFile(s.filepath))
+                setSmells(codeSmells)
             }
-        } catch {
-            // Ignorer et utiliser les données de démo
+        } catch (e) {
+            console.warn('Failed to load smells:', e)
         }
     }
 
-    const loadSummary = async () => {
+    const loadSummary = async (repoId: number) => {
         try {
-            const response = await analyseStatiqueClient.get(`/summary/${selectedRepoId}`)
-            if (response.data?.summary) {
-                setSummary(response.data.summary)
-            } else if (response.data && response.data.file_count !== undefined) {
-                setSummary(response.data)
+            const response = await analyseStatiqueClient.get(`/summary/${repoId}`)
+            const summaryData = response.data?.summary || response.data
+            if (summaryData && summaryData.file_count !== undefined) {
+                setSummary(summaryData)
             }
-        } catch {
-            // Ignorer et utiliser les données de démo
+        } catch (e) {
+            console.warn('Failed to load summary:', e)
         }
     }
 
-    const loadDemoData = () => {
-        // Données de démonstration
+    const loadDemoData = (repoId: number) => {
+        // Générer des noms de fichiers basés sur le repo sélectionné
+        const repoName = repos.find(r => r.id === repoId)?.name || 'demo'
+        const prefix = repoName.replace(/-/g, '')
+
         setMetrics([
-            { filepath: 'UserService.java', cyclomatic_complexity: 45, wmc: 35, dit: 2, noc: 1, cbo: 12, rfc: 42, lcom: 65, fan_in: 8, fan_out: 15, loc: 280, sloc: 220, code_smells_count: 3 },
-            { filepath: 'OrderController.java', cyclomatic_complexity: 32, wmc: 28, dit: 1, noc: 0, cbo: 8, rfc: 35, lcom: 45, fan_in: 5, fan_out: 12, loc: 190, sloc: 150, code_smells_count: 2 },
-            { filepath: 'ProductRepository.java', cyclomatic_complexity: 18, wmc: 15, dit: 1, noc: 2, cbo: 5, rfc: 22, lcom: 30, fan_in: 10, fan_out: 6, loc: 120, sloc: 95, code_smells_count: 1 },
-            { filepath: 'AuthFilter.java', cyclomatic_complexity: 52, wmc: 42, dit: 3, noc: 0, cbo: 15, rfc: 55, lcom: 78, fan_in: 2, fan_out: 18, loc: 350, sloc: 280, code_smells_count: 5 },
-            { filepath: 'DataProcessor.java', cyclomatic_complexity: 28, wmc: 22, dit: 2, noc: 1, cbo: 9, rfc: 30, lcom: 40, fan_in: 6, fan_out: 10, loc: 180, sloc: 140, code_smells_count: 2 },
-            { filepath: 'helpers.py', cyclomatic_complexity: 12, wmc: 10, dit: 0, noc: 0, cbo: 3, rfc: 15, lcom: 20, fan_in: 15, fan_out: 5, loc: 80, sloc: 60, code_smells_count: 0 },
+            { filepath: `${prefix}/MainClass.java`, cyclomatic_complexity: 25, wmc: 20, dit: 2, noc: 1, cbo: 8, rfc: 30, lcom: 45, fan_in: 5, fan_out: 10, loc: 180, sloc: 140, code_smells_count: 2 },
+            { filepath: `${prefix}/ServiceImpl.java`, cyclomatic_complexity: 35, wmc: 28, dit: 1, noc: 0, cbo: 12, rfc: 42, lcom: 60, fan_in: 8, fan_out: 15, loc: 250, sloc: 200, code_smells_count: 3 },
+            { filepath: `${prefix}/Repository.java`, cyclomatic_complexity: 15, wmc: 12, dit: 1, noc: 2, cbo: 5, rfc: 20, lcom: 25, fan_in: 12, fan_out: 5, loc: 100, sloc: 80, code_smells_count: 0 },
+            { filepath: `${prefix}/Controller.java`, cyclomatic_complexity: 20, wmc: 18, dit: 1, noc: 0, cbo: 7, rfc: 28, lcom: 35, fan_in: 3, fan_out: 8, loc: 150, sloc: 120, code_smells_count: 1 },
         ])
 
         setSmells([
-            { filepath: 'AuthFilter.java', smell_type: 'high_complexity', severity: 'high', message: 'Cyclomatic complexity of 52 exceeds threshold of 10' },
-            { filepath: 'AuthFilter.java', smell_type: 'god_class', severity: 'high', message: 'Class has too many responsibilities' },
-            { filepath: 'AuthFilter.java', smell_type: 'long_method', severity: 'medium', message: 'Method authenticate() is too long (85 lines)' },
-            { filepath: 'UserService.java', smell_type: 'high_coupling', severity: 'medium', message: 'CBO of 12 exceeds threshold of 10' },
-            { filepath: 'UserService.java', smell_type: 'large_class', severity: 'low', message: 'Class has 280 lines' },
-            { filepath: 'OrderController.java', smell_type: 'high_complexity', severity: 'medium', message: 'Cyclomatic complexity of 32 exceeds threshold of 10' },
+            { filepath: `${prefix}/ServiceImpl.java`, smell_type: 'high_complexity', severity: 'high', message: 'Cyclomatic complexity exceeds threshold' },
+            { filepath: `${prefix}/ServiceImpl.java`, smell_type: 'high_coupling', severity: 'medium', message: 'CBO exceeds recommended value' },
+            { filepath: `${prefix}/MainClass.java`, smell_type: 'long_method', severity: 'low', message: 'Method too long' },
         ])
 
         setSummary({
-            file_count: 6,
-            avg_cyclomatic_complexity: 31.2,
-            max_cyclomatic_complexity: 52,
-            avg_wmc: 25.3,
-            avg_cbo: 8.7,
-            avg_lcom: 46.3,
-            total_code_smells: 13,
-            total_loc: 1200
+            file_count: 4,
+            avg_cyclomatic_complexity: 23.75,
+            max_cyclomatic_complexity: 35,
+            avg_wmc: 19.5,
+            avg_cbo: 8,
+            avg_lcom: 41.25,
+            total_code_smells: 6,
+            total_loc: 680
         })
     }
 
@@ -176,10 +198,10 @@ export function AnalyseStatiquePage() {
         setAnalyzing(true)
         try {
             await analyseStatiqueClient.post('/analyze', { repo_id: selectedRepoId })
-            await loadData()
+            await loadData(selectedRepoId)
         } catch (error) {
             console.error('Analysis failed:', error)
-            loadDemoData()
+            loadDemoData(selectedRepoId)
         } finally {
             setAnalyzing(false)
         }
