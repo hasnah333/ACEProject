@@ -9,15 +9,15 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                echo '📥 Récupération du code source...'
+                echo ' Récupération du code source...'
                 sh 'ls -la ${WORKSPACE_PATH} || echo "Workspace not mounted"'
-                echo '✅ Code source disponible'
+                echo ' Code source disponible'
             }
         }
         
         stage('Environment Check') {
             steps {
-                echo '🔍 Vérification de l environnement...'
+                echo ' Vérification de l environnement...'
                 sh '''
                     echo "=== Docker ===" 
                     docker --version || echo "Docker non disponible"
@@ -34,13 +34,13 @@ pipeline {
                     echo "=== Docker Compose ==="
                     docker-compose --version || echo "Docker Compose non disponible"
                 '''
-                echo '✅ Environnement vérifié'
+                echo ' Environnement vérifié'
             }
         }
         
         stage('Build Backend Services') {
             steps {
-                echo '🔧 Construction des services backend...'
+                echo ' Construction des services backend...'
                 dir("${WORKSPACE_PATH}") {
                     sh '''
                         echo "Building collecte-depots..."
@@ -59,13 +59,13 @@ pipeline {
                         docker-compose build analyse-statique 2>&1 | tail -10 || echo "Build skipped"
                     '''
                 }
-                echo '✅ Services backend construits'
+                echo ' Services backend construits'
             }
         }
         
         stage('Build Frontend') {
             steps {
-                echo '🎨 Construction du frontend...'
+                echo 'Construction du frontend...'
                 dir("${WORKSPACE_PATH}/frontend") {
                     sh '''
                         echo "Installing dependencies..."
@@ -75,26 +75,26 @@ pipeline {
                         npm run build 2>&1 | tail -20 || echo "Build completed with warnings"
                     '''
                 }
-                echo '✅ Frontend construit'
+                echo ' Frontend construit'
             }
         }
         
         stage('Run Linting') {
             steps {
-                echo '🔍 Analyse du code...'
+                echo ' Analyse du code...'
                 dir("${WORKSPACE_PATH}/frontend") {
                     sh '''
                         echo "Running ESLint..."
                         npm run lint 2>&1 | tail -30 || echo "Linting completed with warnings"
                     '''
                 }
-                echo '✅ Analyse terminée'
+                echo ' Analyse terminée'
             }
         }
         
         stage('Docker Services Status') {
             steps {
-                echo '🐳 Vérification des services Docker...'
+                echo ' Vérification des services Docker...'
                 sh '''
                     echo "=== Running Containers ==="
                     docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | head -20
@@ -103,13 +103,13 @@ pipeline {
                     echo "=== Docker Images ==="
                     docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" | grep ace | head -10 || echo "No ACE images found"
                 '''
-                echo '✅ Services vérifiés'
+                echo ' Services vérifiés'
             }
         }
         
         stage('Deploy') {
             steps {
-                echo '🚀 Déploiement des services...'
+                echo ' Déploiement des services...'
                 dir("${WORKSPACE_PATH}") {
                     sh '''
                         echo "Starting services..."
@@ -125,21 +125,17 @@ pipeline {
                         docker ps --format "table {{.Names}}\t{{.Status}}" | head -15
                     '''
                 }
-                echo '✅ Déploiement terminé'
+                echo ' Déploiement terminé'
             }
         }
     }
     
     post {
         always {
-            echo '📋 Pipeline terminé'
+            echo ' Pipeline terminé'
         }
         success {
-            echo '''
-            ✅ ================================
-            ✅ PIPELINE EXÉCUTÉ AVEC SUCCÈS!
-            ✅ ================================
-            
+            echo '''  
             Services disponibles:
             - Frontend: http://localhost:3000
             - Backend API: http://localhost:8001
@@ -147,7 +143,7 @@ pipeline {
             '''
         }
         failure {
-            echo '❌ Le pipeline a échoué - vérifiez les logs ci-dessus'
+            echo ' Le pipeline a échoué - vérifiez les logs ci-dessus'
         }
     }
 }
