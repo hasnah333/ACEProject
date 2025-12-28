@@ -19,7 +19,6 @@ services:
       POSTGRES_DB: ace_db
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./backend/init-db.sql:/docker-entrypoint-initdb.d/init.sql
     ports:
       - "5432:5432"
     healthcheck:
@@ -136,12 +135,19 @@ services:
       - MLFLOW_TRACKING_URI=http://mlflow:5000
       - MODELS_PATH=/app/models
       - DATASETS_PATH=/app/datasets
+      - ARTIFACTS_PATH=/app/artifacts
     depends_on:
       postgres:
         condition: service_healthy
     volumes:
       - models_data:/app/models
       - datasets_data:/app/datasets
+      - ml_artifacts:/app/artifacts
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8003/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     networks:
       - ace_network
 
@@ -239,5 +245,6 @@ volumes:
   repos_data:
   datasets_data:
   models_data:
+  ml_artifacts:
 
 

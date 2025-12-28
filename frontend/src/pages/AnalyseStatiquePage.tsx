@@ -517,7 +517,7 @@ export function AnalyseStatiquePage() {
             {/* Légende des Métriques */}
             <UiCard>
                 <h2 className="text-lg font-semibold mb-4 text-slate-900 dark:text-slate-50">
-                    📚 Légende des Métriques CK
+                    Légende des Métriques CK
                 </h2>
                 <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
                     <MetricLegend

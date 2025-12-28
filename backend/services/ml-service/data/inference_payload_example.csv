@@ -1,0 +1,9 @@
+repo,module,language,snapshot_date,class_fqn,loc,cyclomatic_complexity,wmc,dit,noc,cbo,rfc,lcom,fan_in,fan_out,code_smells,num_commits_30d,added_loc_30d,deleted_loc_30d,num_authors_30d,days_since_last_change,bugfix_commits_90d,issues_90d,line_coverage_pct,branch_coverage_pct,mutation_score_pct,tests_failed_30d,flaky_rate
+repo_alpha,utils,Kotlin,2025-01-31,com.ocp.transport.utils.Class0093,444,9.19,9.78,6,1,1.43,9.73,3.01,4,3,1,3,12,4,1,160,0,1,,39.53,65.01,0,0.123
+repo_gamma,core,Java,2025-06-30,com.ocp.transport.core.Class0065,66,5.27,9.89,2,2,2.98,13.59,0.45,2,1,1,10,13,7,2,22,1,0,68.41,62.52,,0,0.1169
+repo_alpha,service,Java,2025-10-19,com.ocp.quality.service.Class0032,282,7.83,9.0,1,1,0.09,12.43,1.18,0,0,2,4,18,13,0,77,1,2,70.13,55.18,58.27,0,0.1112
+repo_alpha,service,Java,2025-05-01,com.ocp.quality.service.Class0187,729,11.0,12.54,5,2,0.94,1.0,3.03,0,1,3,4,22,20,0,153,1,0,72.92,75.77,,0,0.0289
+repo_gamma,service,Java,2024-05-07,com.ocp.transport.service.Class0026,697,8.1,7.56,1,0,0.0,1.0,4.72,2,2,4,6,56,34,1,120,2,0,,54.32,9.49,3,0.2293
+repo_beta,api,Java,2025-07-27,com.ocp.platform.api.Class0196,73,5.1,5.01,6,2,0.0,1.0,1.69,2,1,0,1,2,0,0,11,0,1,61.45,43.41,46.38,2,
+repo_gamma,utils,Java,2024-10-23,com.ocp.utils.Class0034,77,1.0,1.0,5,2,1.05,1.0,1.66,2,1,1,4,7,2,0,30,2,1,70.77,53.41,64.06,1,0.0163
+repo_beta,data,Kotlin,2025-01-29,com.ocp.transport.data.Class0116,245,4.78,13.28,6,3,0.0,5.94,4.38,0,2,1,5,19,12,1,8,2,4,68.24,59.1,39.27,0,0.0408
