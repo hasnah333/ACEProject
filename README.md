@@ -142,3 +142,23 @@ GET    /policies               # Politiques de priorisation
 - el bahtari hafsa
 
 ##  Ce projet est développé dans le cadre académique.
+
+#### Connect Repo 
+![WhatsApp Image 2025-12-28 at 3 30 27 AM](https://github.com/user-attachments/assets/2fbc80c2-a1b1-45c3-85f0-4601a22e1d38)
+##### Quality Overview
+![WhatsApp Image 2025-12-28 at 3 30 48 AM](https://github.com/user-attachments/assets/1b7b09cd-ae95-4008-a29c-41e66343eeec)
+#### Advanced Quality Dashboard
+![WhatsApp Image 2025-12-28 at 3 31 15 AM](https://github.com/user-attachments/assets/88675e3c-f3b3-4216-a775-5f697bd09a60)
+##### Évolution Temporelle des Métriques
+![WhatsApp Image 2025-12-28 at 3 31 49 AM](https://github.com/user-attachments/assets/2af59c14-0c30-4479-83e5-b3ef2950ee97)
+
+### Détail de la Comparaison - Métriques Effort-Aware des Modèles
+
+![WhatsApp Image 2025-12-28 at 3 32 19 AM](https://github.com/user-attachments/assets/19811bbb-cd5b-4e02-8377-d597d9ecbc39)
+
+####  
+
+
+
+
+
