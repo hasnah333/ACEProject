@@ -124,7 +124,7 @@ services:
 
   ml-service:
     build:
-      context: ./backend/services/ml-service
+      context: ./backend/data
       dockerfile: Dockerfile
     container_name: ace_ml_service
     ports:
@@ -140,9 +140,8 @@ services:
       postgres:
         condition: service_healthy
     volumes:
-      - models_data:/app/models
-      - datasets_data:/app/datasets
-      - ml_artifacts:/app/artifacts
+      - ./backend/data/models:/app/models
+      - ./backend/data/datasets:/app/datasets
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8003/health" ]
       interval: 30s

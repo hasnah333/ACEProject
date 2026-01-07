@@ -573,9 +573,16 @@ async def analyze_repository(request: AnalyzeRequest, db: AsyncSession = Depends
     for file_row in files:
         file_id, filepath, filename, extension = file_row
         
-        # Ici, on devrait lire le contenu du fichier depuis le disque ou le repo cloné
-        # Pour la démo, on génère des métriques synthétiques
-        metrics = generate_synthetic_file_metrics(filepath, extension)
+        # Try to fetch real content from GitHub
+        metrics = None
+        if repo.url and "github.com" in repo.url:
+            content = await fetch_github_file_content(repo.url, filepath)
+            if content:
+                metrics = await analyze_file(filepath, content)
+        
+        if not metrics:
+            # Fallback to synthetic metrics if content fetch failed
+            metrics = generate_synthetic_file_metrics(filepath, extension)
         
         # Sauvegarder en base
         try:

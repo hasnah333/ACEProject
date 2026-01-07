@@ -164,7 +164,12 @@ FEATURE_SCHEMA = [
 # ============ Feature Engineering ============
 
 def engineer_features(df: pd.DataFrame) -> tuple:
-    """Create 12+ engineered features."""
+    """Créer plus de 12 features ingénierées.
+    
+    FEATURE ENGINEERING:
+    L'objectif est de créer de nouvelles métriques (X) plus pertinentes
+    en combinant les métriques brutes existantes.
+    """
     df = df.copy()
     engineered = []
     
@@ -257,7 +262,7 @@ def engineer_features(df: pd.DataFrame) -> tuple:
 
 
 def handle_outliers(df: pd.DataFrame, numeric_cols: List[str]) -> pd.DataFrame:
-    """Apply winsorization to handle outliers."""
+    """Applique la winsorisation pour gérer les valeurs aberrantes (outliers)."""
     df = df.copy()
     
     for col in numeric_cols:
@@ -274,10 +279,19 @@ def apply_smote(df: pd.DataFrame) -> pd.DataFrame:
     try:
         from imblearn.over_sampling import SMOTE
         
+        # ---------------------------------------------------------
+        # DEFINITION DE X et y pour l'apprentissage supervisé
+        # ---------------------------------------------------------
+        # X (Features) : La matrice des caractéristiques du code
+        # Chaque ligne est un fichier, chaque colonne une métrique (LOC, complexité, etc.)
         feature_cols = [c for c in df.columns if c not in 
                         ["file_id", "filepath", "is_buggy", "commit_sha", "created_at"]]
         X = df[feature_cols].values
+        
+        # y (Target/Cible) : La variable qu'on veut prédire (Classification Binaire)
+        # 0 = Sain (Clean), 1 = Buggé (Buggy)
         y = df["is_buggy"].values
+        # ---------------------------------------------------------
         
         # Vérifier qu'on a assez d'échantillons de chaque classe
         if y.sum() < 2 or (len(y) - y.sum()) < 2:
@@ -593,7 +607,7 @@ async def save_dataset(
     balancing_strategy: str,
     temporal_split: bool
 ) -> int:
-    """Sauvegarde le dataset en base et sur disque."""
+    """Sauvegarde le dataset en base de données et sur le disque."""
     
     feature_names = [f["name"] for f in FEATURE_SCHEMA]
     

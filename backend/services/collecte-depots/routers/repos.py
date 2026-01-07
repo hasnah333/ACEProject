@@ -357,13 +357,15 @@ async def collect_repo(repo_id: int, background_tasks: BackgroundTasks, db: Asyn
                                 logger.warning(f"Failed to collect files: {e}")
                                 await db.rollback()
                             
-                except (httpx.ConnectError, httpx.TimeoutException, Exception) as e:
-                    logger.warning(f"GitHub API not available: {e}. Using demo data.")
-                    github_success = False
+                except Exception as e:
+                    logger.error(f"GitHub API error: {e}")
+                    logger.error(traceback.format_exc())
+                    # Do NOT fallback to demo data silently
+                    raise HTTPException(status_code=500, detail=f"Failed to collect from GitHub: {str(e)}")
+
         
-        # Si GitHub n'est pas disponible, générer des données de démonstration
-        if not github_success:
-            logger.info("Generating demo data for repository")
+        if not github_success and provider != "github":
+            logger.info("Generating demo data for non-GitHub repository")
             demo_commits = [
                 {"sha": f"demo{i}abc123def456", "message": f"Demo commit {i}: {'Fix bug' if i % 3 == 0 else 'Feature update'}", 
                  "author_name": "Demo Author", "author_email": "demo@example.com", "is_bugfix": i % 3 == 0}
