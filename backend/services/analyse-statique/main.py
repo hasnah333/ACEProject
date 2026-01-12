@@ -22,6 +22,8 @@ import os
 import re
 import logging
 import json
+import base64
+import httpx
 from datetime import datetime
 
 # Outils d'analyse statique
@@ -70,6 +72,43 @@ async def get_db():
             yield session
         finally:
             await session.close()
+
+
+# GitHub Token from environment
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
+
+
+async def fetch_github_file_content(repo_url: str, filepath: str) -> Optional[str]:
+    """Fetch file content from GitHub API."""
+    try:
+        # Parse owner/repo from URL
+        # Example: https://github.com/owner/repo -> owner/repo
+        parts = repo_url.rstrip("/").replace(".git", "").split("/")
+        if len(parts) >= 2:
+            owner, repo = parts[-2], parts[-1]
+        else:
+            return None
+        
+        api_url = f"https://api.github.com/repos/{owner}/{repo}/contents/{filepath}"
+        
+        headers = {"Accept": "application/vnd.github.v3+json"}
+        if GITHUB_TOKEN:
+            headers["Authorization"] = f"token {GITHUB_TOKEN}"
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(api_url, headers=headers)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("encoding") == "base64" and data.get("content"):
+                    content = base64.b64decode(data["content"]).decode("utf-8", errors="ignore")
+                    return content
+            else:
+                logger.warning(f"Failed to fetch {filepath}: {response.status_code}")
+    except Exception as e:
+        logger.warning(f"Error fetching {filepath}: {e}")
+    
+    return None
 
 
 @asynccontextmanager
@@ -524,15 +563,26 @@ async def analyze_repository(request: AnalyzeRequest, db: AsyncSession = Depends
         logger.info("No files found, generating synthetic metrics")
         return await generate_synthetic_metrics(db, request.repo_id)
     
+    # Nettoyer les anciens résultats pour ce repo
+    await db.execute(text("DELETE FROM file_metrics WHERE repo_id = :id"), {"id": request.repo_id})
+    await db.execute(text("DELETE FROM code_smells WHERE repo_id = :id"), {"id": request.repo_id})
+    
     metrics_results = []
     total_smells = 0
     
     for file_row in files:
         file_id, filepath, filename, extension = file_row
         
-        # Ici, on devrait lire le contenu du fichier depuis le disque ou le repo cloné
-        # Pour la démo, on génère des métriques synthétiques
-        metrics = generate_synthetic_file_metrics(filepath, extension)
+        # Try to fetch real content from GitHub
+        metrics = None
+        if repo.url and "github.com" in repo.url:
+            content = await fetch_github_file_content(repo.url, filepath)
+            if content:
+                metrics = await analyze_file(filepath, content)
+        
+        if not metrics:
+            # Fallback to synthetic metrics if content fetch failed
+            metrics = generate_synthetic_file_metrics(filepath, extension)
         
         # Sauvegarder en base
         try:
@@ -579,6 +629,25 @@ async def analyze_repository(request: AnalyzeRequest, db: AsyncSession = Depends
             )
         except Exception as e:
             logger.warning(f"Failed to save metrics for {filepath}: {e}")
+            
+        # Sauvegarder les smells
+        for smell in metrics.get("code_smells", []):
+            try:
+                await db.execute(
+                    text("""
+                        INSERT INTO code_smells (repo_id, filepath, smell_type, severity, message)
+                        VALUES (:repo_id, :filepath, :type, :severity, :msg)
+                    """),
+                    {
+                        "repo_id": request.repo_id,
+                        "filepath": filepath,
+                        "type": smell["smell_type"],
+                        "severity": smell["severity"],
+                        "msg": smell["message"]
+                    }
+                )
+            except Exception as e:
+                logger.warning(f"Failed to save smell for {filepath}: {e}")
         
         metrics_results.append(FileMetricsResult(
             filepath=filepath,
@@ -616,25 +685,70 @@ async def analyze_repository(request: AnalyzeRequest, db: AsyncSession = Depends
 
 
 async def generate_synthetic_metrics(db: AsyncSession, repo_id: int) -> AnalyzeResponse:
-    """Génère des métriques synthétiques pour la démonstration."""
+    """Génère des métriques en analysant les fichiers réels depuis GitHub."""
     import random
     
-    synthetic_files = [
-        "src/main/java/com/example/UserService.java",
-        "src/main/java/com/example/OrderController.java",
-        "src/main/java/com/example/ProductRepository.java",
-        "src/main/java/com/example/AuthenticationFilter.java",
-        "src/main/java/com/example/DataProcessor.java",
-        "src/main/python/utils/helpers.py",
-        "src/main/python/services/ml_engine.py",
-    ]
+    # Récupérer les infos du repo
+    repo_result = await db.execute(
+        text("SELECT name, url FROM repositories WHERE id = :id"), 
+        {"id": repo_id}
+    )
+    repo_row = repo_result.fetchone()
+    repo_name = repo_row[0] if repo_row else "project"
+    repo_url = repo_row[1] if repo_row else ""
+    
+    # Récupérer les fichiers depuis file_metrics (collectés par collecte-depots)
+    real_files_result = await db.execute(
+        text("SELECT DISTINCT filepath FROM file_metrics WHERE repo_id = :id LIMIT 30"),
+        {"id": repo_id}
+    )
+    real_paths = [r[0] for r in real_files_result.fetchall()]
+    
+    if not real_paths:
+        # Essayer de récupérer depuis la table files
+        files_result = await db.execute(
+            text("SELECT DISTINCT filepath FROM files WHERE repo_id = :id LIMIT 30"),
+            {"id": repo_id}
+        )
+        real_paths = [r[0] for r in files_result.fetchall()]
+    
+    if not real_paths:
+        real_paths = [
+            f"src/main.py",
+            f"src/utils.py", 
+            f"src/api.py"
+        ]
+    
+    # Filtrer uniquement les fichiers de code
+    code_extensions = {'.py', '.java', '.js', '.ts', '.tsx', '.jsx', '.go', '.rs', '.cpp', '.c'}
+    code_files = [f for f in real_paths if Path(f).suffix.lower() in code_extensions]
+    
+    if not code_files:
+        code_files = real_paths[:10]
     
     metrics_results = []
     total_smells = 0
     
-    for filepath in synthetic_files:
-        ext = Path(filepath).suffix
-        metrics = generate_synthetic_file_metrics(filepath, ext)
+    for filepath in code_files:
+        ext = Path(filepath).suffix.lower()
+        
+        # Essayer de récupérer le vrai contenu depuis GitHub
+        content = None
+        if repo_url and "github.com" in repo_url:
+            content = await fetch_github_file_content(repo_url, filepath)
+        
+        if content:
+            # Analyse réelle avec radon/lizard
+            metrics = await analyze_file(filepath, content)
+            logger.info(f"Analyzed {filepath}: CC={metrics['cyclomatic_complexity']}, LOC={metrics['loc']}")
+        else:
+            # Fallback sur métriques synthétiques si pas de contenu
+            metrics = generate_synthetic_file_metrics(filepath, ext)
+        
+        # Skip non-code files (metrics is None)
+        if metrics is None:
+            logger.info(f"Skipping non-code file: {filepath}")
+            continue
         
         metrics_results.append(FileMetricsResult(
             filepath=filepath,
@@ -702,6 +816,26 @@ async def generate_synthetic_metrics(db: AsyncSession, repo_id: int) -> AnalyzeR
             )
         except Exception as e:
             logger.warning(f"Failed to save synthetic metrics: {e}")
+            
+        # Sauvegarder les smells synthétiques
+        if "code_smells" in metrics:
+            for smell in metrics["code_smells"]:
+                try:
+                    await db.execute(
+                        text("""
+                            INSERT INTO code_smells (repo_id, filepath, smell_type, severity, message)
+                            VALUES (:repo_id, :filepath, :type, :severity, :msg)
+                        """),
+                        {
+                            "repo_id": repo_id,
+                            "filepath": filepath,
+                            "type": smell["smell_type"],
+                            "severity": smell["severity"],
+                            "msg": smell["message"]
+                        }
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to save synthetic smell: {e}")
     
     await db.commit()
     
@@ -714,21 +848,33 @@ async def generate_synthetic_metrics(db: AsyncSession, repo_id: int) -> AnalyzeR
 
 
 def generate_synthetic_file_metrics(filepath: str, extension: str) -> Dict[str, Any]:
-    """Génère des métriques synthétiques réalistes pour un fichier."""
+    """Génère des métriques synthétiques réalistes pour un fichier de code."""
     import random
+    
+    # Exclure les fichiers non-code
+    non_code_files = {'README.md', 'Dockerfile', '.gitignore', 'LICENSE', 'Makefile', 
+                      '.env', 'docker-compose.yml', 'package.json', 'requirements.txt'}
+    filename = Path(filepath).name
+    if filename in non_code_files or extension.lower() in {'.md', '.txt', '.json', '.yml', '.yaml', '.xml', '.html', '.css'}:
+        return None  # Skip non-code files
     
     language = detect_language(filepath)
     
-    # Générer des valeurs réalistes
+    # Générer des valeurs réalistes (entiers uniquement)
     num_methods = random.randint(3, 25)
     cc_values = [random.randint(1, 15) for _ in range(num_methods)]
     
+    # Calculer des métriques différenciées (tous en entiers)
+    total_cc = sum(cc_values)
+    max_cc = max(cc_values) if cc_values else 0
+    avg_cc = round(total_cc / len(cc_values)) if cc_values else 0
+    
     metrics = {
         "language": language,
-        "cyclomatic_complexity": sum(cc_values),
-        "max_cyclomatic_complexity": max(cc_values) if cc_values else 0,
-        "avg_cyclomatic_complexity": sum(cc_values) / len(cc_values) if cc_values else 0,
-        "wmc": sum(cc_values),
+        "cyclomatic_complexity": total_cc,
+        "max_cyclomatic_complexity": max_cc,
+        "avg_cyclomatic_complexity": avg_cc,
+        "wmc": total_cc,  # WMC = somme des CC (entier)
         "dit": random.randint(0, 5),
         "noc": random.randint(0, 3),
         "cbo": random.randint(2, 15),

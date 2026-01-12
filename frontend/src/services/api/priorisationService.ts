@@ -18,6 +18,7 @@ export type PrioritizationRequest = {
   weights?: {
     risk?: number
     crit?: number
+    coverage?: number
   }
   sprint_context?: {
     capacity?: number

@@ -192,11 +192,15 @@ export function MLPipelinePage() {
                 onChange={(e) => setConfig({ ...config, model_family: e.target.value as 'auto' | 'ensemble' | 'xgb' | 'lgbm' | 'rf' })}
                 className="w-full px-3 py-2 border border-slate-300 rounded-md dark:bg-slate-800 dark:border-slate-600"
               >
-                <option value="auto">Auto</option>
-                <option value="ensemble">Ensemble</option>
+                <option value="auto">Auto (Best Selection)</option>
+                <option value="ensemble">Ensemble (Stacking + Voting)</option>
                 <option value="xgb">XGBoost</option>
                 <option value="lgbm">LightGBM</option>
                 <option value="rf">Random Forest</option>
+                <option value="stacking">Stacking Classifier</option>
+                <option value="voting">Voting Classifier</option>
+                <option value="logreg">Logistic Regression</option>
+                <option value="gb">Gradient Boosting</option>
               </select>
             </div>
 

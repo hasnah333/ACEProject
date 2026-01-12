@@ -1,0 +1,10 @@
+{
+  "accuracy": 0.8568709554625048,
+  "f1": 0.8244631185807656,
+  "recall": 0.833805476864967,
+  "precision": 0.8153277931671283,
+  "auc": 0.9355855302460928,
+  "threshold": 0.49,
+  "best_model": "Ensemble",
+  "best_smote": "BorderlineSMOTE"
+}
